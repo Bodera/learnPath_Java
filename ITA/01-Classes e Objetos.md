@@ -1,0 +1,17 @@
+# Identificando Classes e Objetos.
+
+O objetivo dessa aula é mostrar a você pouquinho sobre como você descobrir quais são as classes, quais são os objetos, qual o significado disso tudo dentro do sistema orientado a objetos. O que a gente vai tá tentando responder aqui é quais são as partes do seu software. 
+
+Então imagina o seguinte, que eu tenho por exemplo sistema de pet-shop. Eu vou ter aí o cão, vou ter os produtos que às vezes podem ser, por exemplo, uma caminha ou uma comida de cachorro, de repente pode ser uma tosa, banho e tem os usuários que são os donos desses caninos aí. O que é que são isso? O que é que é isso aí dentro do meu sistema? São as entidades, são aquelas coisas que fazem parte do meu negócio, que fazem parte do meu sistema. Essas entidades, elas colaboram para poder criar a funcionalidade do software. 
+
+E essas entidades que colaboram para criar essas funcionalidades no sistema, são chamadas de __classes__. As classes, elas são *abstrações*. 
+
+E aí se a gente pensar exemplos de cadeira, mesmo que a gente tenha aquela, digamos assim, aquela ideia idealizada, aquela coisa assim do que é uma cadeira, a gente vai ter ali por exemplo uma que é de madeira, uma de plástico, tem essa outra ali que tem as rodinhas no pé, então a gente tem vários tipo de cadeira, algumas mais parecidas, outras diferentes, mas que todas encaixam nesse conceito que a gente tem do que é ser uma cadeira. E cada cadeira, como eu disse, tem as suas características, o formato do acento, como que são os pés, como que é o encosto, material que ela é feita, cada cadeira tem as suas caraterísticas. E aí o __objeto__ é uma *Instância Concreta* da classe. 
+
+Eu tenho a minha ideia de cadeira, agora por exemplo essa cadeira que você aí está sentado, ela é uma instância dessa classe de cadeira, ela é um __objeto__. Então a gente pode dizer que a `Classe Cadeira`, ela vai criar ou instanciar `Objetos Cadeira`. Não é que ela que vai lá e cria, mas baseado naquela ideia que a gente tem de cadeira, as pessoas constroem efetivamente as cadeiras que existem. Então, uma classe, ela vai estar criando ou *instanciando* objetos dela. E uma coisa importante é que esses objetos, eles são únicos!
+
+Eu ter, por exemplo, duas cadeiras do mesmo tipo, não significa que são o mesmo objeto. Os objetos, eles são únicos. Duas cadeiras iguais, elas são da mesma classe, mas são objetos diferentes. 
+
+Bom, tenho certeza que todo mundo aí deve ter acertado, mas se a gente for parar para pensar, apesar do banco a gente poder sentar e às vezes ele ser até mais parecido com as cadeiras que a gente viu antes, ele não se encaixa na ideia que a gente tem de cadeira, naquela abstração de cadeira. Por isso que ele não é uma instância de cadeira. Agora os outros tipos, elas se encaixam então seriam instâncias de cadeira. Mesmo que elas sejam diferentes, uma tem rodinhas a outra tem ali a mesinha para o neném comer e etc.
+
+Então, resumindo aqui, a __classe__, ela é uma abstração, ela é *abstrata*. O __objeto__, ele é *concreto*. Então se a classe é uma generalização, é uma ideia de uma cadeira, o objeto, ele vai ser uma cadeira, essa aí que você está sentando por exemplo. E os objetos eles são únicos então eu posso ter diferentes tipos de cadeira com diferentes características que vão ser diferentes objetos da classe cadeira. E aí a gente tem que uma classe, ela cria ou instancia objetos daquela classe. E são esse conceitos aí que a gente vai utilizar quando a gente tiver criando classes e instanciando objetos dentro de software orientado a objetos. 
