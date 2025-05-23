@@ -11,7 +11,7 @@ System.out.println(stream.map(i -> i * 2).collect(Collectors.toList()));
 
 Streams don't change the original data structure (list, array, etc), they only provide the result as per the pipelining methods.
 
-You can find an example of a stream [here](./src/StreamExample.java).
+You can find an example of a stream [here](./src/streamsapi/StreamExample.java).
 
 ## Collections vs Streams
 
@@ -27,25 +27,25 @@ You can find an example of a stream [here](./src/StreamExample.java).
 | **Data manipulation** | Can read and write | Read only |
 | **Usage** | Collection of the data itself | About computation on data |
 
-You can find an example comparing collections and streams [here](./src/CollectionVsStreamsExample.java).
+You can find an example comparing collections and streams [here](./src/streamsapi/CollectionVsStreamsExample.java).
 
 ## Stream map()
 
 The `map()` function is designed to transform the elements of a stream using a function. It returns a new stream that contains the transformed elements which may be of a different type from the original elements. It has no relation to the `Map` collection.
 
-You can find an example of the `map()` function [here](./src/StreamMapExample.java).
+You can find an example of the `map()` function [here](./src/streamsapi/StreamMapExample.java).
 
 ## Stream flatMap()
 
 The `flatMap()` function also transforms one type to another type. It is designed to flatten a stream of collection into a new stream by applying one-to-many transformation.
 
-You can find an example of the `flatMap()` function [here](./src/StreamFlatMapExample.java).
+You can find an example of the `flatMap()` function [here](./src/streamsapi/StreamFlatMapExample.java).
 
 ## Stream filter()
 
 The `filter()` function is used to filter the elements of a stream based on a predicate. It returns a new stream that contains only the elements that satisfy the predicate.
 
-You can find an example of the `filter()` function [here](./src/StreamFilterExample.java).
+You can find an example of the `filter()` function [here](./src/streamsapi/StreamFilterExample.java).
 
 ## Stream reduce()
 
@@ -65,13 +65,13 @@ When used with a `BinaryOperator`, the `reduce()` function returns an `Optional`
 stream().reduce((value1, value2) -> function); // optimal case return a Optional containing the reduced value, worst case returns an empty Optional
 ```
 
-You can find an example of the `reduce()` function [here](./src/StreamReduceExample.java).
+You can find an example of the `reduce()` function [here](./src/streamsapi/streamsapi/StreamReduceExample.java).
 
 ## Comparator maxBy() and minBy()
 
 The `maxBy()` and `minBy()` functions are used to find the maximum or minimum element of a stream based on a comparator.
 
-You can find an example of the `maxBy()` and `minBy()` functions [here](./src/StreamMaxByMinByExample.java).
+You can find an example of the `maxBy()` and `minBy()` functions [here](./src/streamsapi/StreamMaxByMinByExample.java).
 
 ## Stream limit() and skip()
 
@@ -79,16 +79,16 @@ The `limit()` function is used to limit the number of elements in a stream. It r
 
 The `skip()` function is used to skip the first `n` elements of a stream and return a new stream that contains the remaining elements.
 
-You can find an example of the `limit()` and `skip()` functions [here](./src/StreamLimitSkipExample.java).
+You can find an example of the `limit()` and `skip()` functions [here](./src/streamsapi/StreamLimitSkipExample.java).
 
 ## Stream anyMatch() and noneMatch() and allMatch()
 
 The `anyMatch()`, `noneMatch()` and `allMatch()` functions are used to check if any, none or all elements of a stream satisfy a predicate, respectively.
 
-You can find an example of the `anyMatch()`, `noneMatch()` and `allMatch()` functions [here](./src/StreamMatchesExample.java).
+You can find an example of the `anyMatch()`, `noneMatch()` and `allMatch()` functions [here](./src/streamsapi/StreamMatchesExample.java).
 
 ## Stream findFirst() and findAny()
 
 The `findFirst()` and `findAny()` functions are used to find the first or any element of a stream, respectively.
 
-You can find an example of the `findFirst()` and `findAny()` functions [here](./src/StreamFindExample.java).
+You can find an example of the `findFirst()` and `findAny()` functions [here](./src/streamsapi/StreamFindExample.java).

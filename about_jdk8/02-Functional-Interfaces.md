@@ -2,7 +2,7 @@
 
 A functional interface is an interface that contains only one abstract method, thus they are dedicated to a single operation. They can also contain *default* and *static* methods.
 
-Lambda expressions can be used to represent an instance of a functional interface, like `Runnable`, `Comparable`, `ActionListener` among others. You can find an example of a functional interface [here](./src/FunctionalInterfaceExample.java).
+Lambda expressions can be used to represent an instance of a functional interface, like `Runnable`, `Comparable`, `ActionListener` among others. You can find an example of a functional interface [here](./src/functionalinterfaces/FunctionalInterfaceExample.java).
 
 There are four pillar interfaces on JDK 8:
 
@@ -30,7 +30,7 @@ public interface Consumer<T> {
 }
 ```
 
-You can find an example of a how to use a consumer interface [here](./src/ConsumerExample.java).
+You can find an example of a how to use a consumer interface [here](./src/functionalinterfaces/ConsumerExample.java).
 
 ### BiConsumer
 
@@ -52,7 +52,7 @@ public interface BiConsumer<T, U> {
 }
 ```
 
-You can find an example of a how to use a bi-consumer interface [here](./src/BiConsumerExample.java).
+You can find an example of a how to use a bi-consumer interface [here](./src/functionalinterfaces/BiConsumerExample.java).
 
 ### Predicate
 
@@ -85,7 +85,7 @@ public interface Predicate<T> {
 }
 ```
 
-You can find an example of a how to use a predicate interface [here](./src/PredicateExample.java).
+You can find an example of a how to use a predicate interface [here](./src/functionalinterfaces/PredicateExample.java).
 
 ### BiPredicate
 
@@ -112,7 +112,7 @@ public interface BiPredicate<T, U> {
 }
 ```
 
-You can find an example of a how to use a bi-predicate interface [here](./src/BiPredicateExample.java).
+You can find an example of a how to use a bi-predicate interface [here](./src/functionalinterfaces/BiPredicateExample.java).
 
 ### Function
 
@@ -139,7 +139,7 @@ public interface Function<T, R> {
 }
 ```
 
-You can find an example of a how to use a function interface [here](./src/FunctionExample.java).
+You can find an example of a how to use a function interface [here](./src/functionalinterfaces/FunctionExample.java).
 
 ### BiFunction
 
@@ -157,7 +157,7 @@ public interface BiFunction<T, U, R> {
 }
 ```
 
-You can find an example of a how to use a bi-function interface [here](./src/BiFunctionExample.java).
+You can find an example of a how to use a bi-function interface [here](./src/functionalinterfaces/BiFunctionExample.java).
 
 ### UnaryOperator
 
@@ -175,7 +175,7 @@ public interface UnaryOperator<T> extends Function<T, T> {
 
 Since it extends the `Function` interface, it can be used in place of a function interface when both input and output types are the same.
 
-You can find an example of a how to use a unary operator interface [here](./src/UnaryOperatorExample.java).
+You can find an example of a how to use a unary operator interface [here](./src/functionalinterfaces/UnaryOperatorExample.java).
 
 ### BinaryOperator
 
@@ -199,7 +199,7 @@ public interface BinaryOperator<T> extends BiFunction<T, T, T> {
 
 Since it extends the `BiFunction` interface, it can be used in place of a bi-function interface when both input and output types are the same.
 
-You can find an example of a how to use a binary operator interface [here](./src/BinaryOperatorExample.java).
+You can find an example of a how to use a binary operator interface [here](./src/functionalinterfaces/BinaryOperatorExample.java).
 
 ### Supplier
 
@@ -212,4 +212,4 @@ public interface Supplier<T> {
 }
 ```
 
-You can find an example of a how to use a supplier interface [here](./src/SupplierExample.java).
+You can find an example of a how to use a supplier interface [here](./src/functionalinterfaces/SupplierExample.java).

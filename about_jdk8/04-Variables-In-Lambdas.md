@@ -6,4 +6,4 @@ First rule, lambdas are allowed to use local variables, but they are not allowed
 
 This rule has one exception: class level variables or instance variables are allowed for modification.
 
-You can find an example of this rule [here](./src/VariablesInLambdasExample.java).
+You can find an example of this rule [here](./src/variables/VariablesInLambdasExample.java).

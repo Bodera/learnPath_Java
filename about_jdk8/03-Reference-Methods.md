@@ -10,4 +10,4 @@ ClassName::methodName
 
 Where the `::` is our **token**. Keep in mind that the target type of the expression must be a functional interface.
 
-You can find an example of a method reference [here](./src/MethodReferenceExample.java).
+You can find an example of a method reference [here](./src/referencemethods/ReferenceMethodExample.java).
