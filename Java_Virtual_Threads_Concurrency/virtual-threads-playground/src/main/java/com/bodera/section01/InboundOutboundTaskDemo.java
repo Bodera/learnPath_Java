@@ -5,7 +5,9 @@ import java.util.concurrent.CountDownLatch;
 public class InboundOutboundTaskDemo {
 
     private static final int TEN_PLATFORM = 10;
-    private static final int TEN_MILLION_PLATFORM = 10000000;
+    private static final int TEN_THOUSAND_PLATFORM = 10_000;
+    private static final int TEN_VIRTUAL = 10;
+    private static final int ONE_MILLION_VIRTUAL = 1_000_000;
 
     public static void main(String[] args) {
         //smallPlatformThreadNonDaemon();
@@ -32,15 +34,22 @@ public class InboundOutboundTaskDemo {
         //smallPlatformThreadDaemon();
         // Method call above provides no output!
 
-        smallPlatformThreadDaemonSync();
+        //smallPlatformThreadDaemonSync();
+
+        //smallVirtualThread();
+        // Method call above provides no output!
+
+        //smallVirtualThreadSync();
+
+        hugeVirtualThreadSync(); // Try increase to one million and set 1 minute on Thread.sleep at Task.java
     }
 
     private static void smallPlatformThreadNonDaemon() {
         threadStarter(TEN_PLATFORM);
     }
 
-    private static void hugePlatformThreadDaemon() {
-        threadStarter(TEN_MILLION_PLATFORM);
+    private static void hugePlatformThreadNonDaemon() {
+        threadStarter(TEN_THOUSAND_PLATFORM);
     }
 
     private static void threadStarter(int numberOfThreads) {
@@ -62,6 +71,10 @@ public class InboundOutboundTaskDemo {
         threadStarterDaemon(TEN_PLATFORM);
     }
 
+    private static void hugePlatformThreadDaemon() {
+        threadStarterDaemon(TEN_THOUSAND_PLATFORM);
+    }
+
     private static void threadStarterDaemon(int numberOfThreads) {
         Thread.Builder.OfPlatform threadBuilder = Thread.ofPlatform().daemon().name("bodera.daemon", 1);
 
@@ -81,6 +94,50 @@ public class InboundOutboundTaskDemo {
         try {
             CountDownLatch taskCountDown = new CountDownLatch(numberOfThreads);
             Thread.Builder.OfPlatform threadBuilder = Thread.ofPlatform().daemon().name("bodera.daemon", 1);
+
+            for (int i = 0; i < numberOfThreads; i++) {
+                int j = i;
+
+                Thread thread = threadBuilder.unstarted(() -> {
+                    Task.ioIntensiveOp(j);
+                    taskCountDown.countDown();
+                });
+                thread.start();
+            }
+
+            taskCountDown.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void smallVirtualThread() {
+        threadStarterDaemon(TEN_VIRTUAL);
+    }
+
+    private static void threadStarterVirtual(int numberOfThreads) {
+        Thread.Builder.OfVirtual threadBuilder = Thread.ofVirtual().name("bodera.virtual", 1);
+
+        for (int i = 0; i < numberOfThreads; i++) {
+            int j = i;
+
+            Thread thread = threadBuilder.unstarted(() -> Task.ioIntensiveOp(j));
+            thread.start();
+        }
+    }
+
+    private static void smallVirtualThreadSync() {
+        threadStarterVirtualSync(TEN_VIRTUAL);
+    }
+
+    private static void hugeVirtualThreadSync() {
+        threadStarterVirtualSync(ONE_MILLION_VIRTUAL);
+    }
+
+    private static void threadStarterVirtualSync(int numberOfThreads) {
+        try {
+            CountDownLatch taskCountDown = new CountDownLatch(numberOfThreads);
+            Thread.Builder.OfVirtual threadBuilder = Thread.ofVirtual().name("bodera.virtual", 1);
 
             for (int i = 0; i < numberOfThreads; i++) {
                 int j = i;

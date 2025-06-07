@@ -202,5 +202,140 @@ for (Thread thread : threads) {
 }
 ```
 
+## Virtual threads scaling
 
+We understood the problem with the platform threads, we reach some resource limits. At this point we can talk about virtual threads.
+
+Java 21 has introduced a new class called `VirtualThread` which extends the original `Thread` class.
+
+```
+-> public Thread (Platform Thread)
+----> abstract BaseVirtualThread
+--------> (package private) VirtualThread
+```
+
+So consider the following code:
+
+```java
+void startThread(Thread thread) {
+    thread.start();
+}
+```
+
+On the example above the parameter `thread` can be either a platform thread or a virtual thread.
+
+We cannot directly create a virtual thread by saying `new VirtualThread()` because it is package private. This is why Java has also introduced the `Thread.Builder`, which we have already used on previous examples. The `Thread.Builder` is an interface with two different implementations:
+
+- `Thread.ofPlatform()` for creating platform threads
+- `Thread.ofVirtual()` for creating virtual threads
+
+Consider the following code:
+
+```java
+Thread createThread(Thread.Builder builder) {
+    return builder.unstarted(() -> someTask());
+}
+```
+
+On the example above we should be able to create both a platform thread or a virtual thread.
+
+Now let's explore a bit more of virtual threads.
+
+```java
+public void static main(String[] args) {
+    smallVirtualThread();
+}
+
+private static void threadStarterVirtual() {
+    Thread.Builder.OfVirtual threadBuilder = Thread.ofVirtual().name("bodera.virutal", 1);
+
+    for (int i = 0; i < 10; i++) {
+        int j = i;
+
+        Thread thread = threadBuilder.unstarted(() -> Task.ioIntensiveOp(j));
+        thread.start();
+    }
+}
+```
+
+If we run the method `main()` we will get the following:
+
+```bash
+> Task :compileJav
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :com.bodera.section01.InboundOutboundTaskDemo.main()
+BUILD SUCCESSFUL in 5s
+
+Process finished with exit code 0
+```
+
+We get no output! That's because virtual threads are daemon threads by default. We cannot create a non-daemon virtual thread.
+
+So let's try to apply `CountDownLatch` to virtual threads.
+
+```java
+public void static main(String[] args) {
+    threadStarterVirtualSync();
+}
+
+private static void threadStarterVirtualSync() {
+    try {
+        CountDownLatch taskCountDown = new CountDownLatch(10);
+        Thread.Builder.OfVirtual threadBuilder = Thread.ofVirtual().name("bodera.virtual", 1);
+
+        for (int i = 0; i < 10; i++) {
+            int j = i;
+
+            Thread thread = threadBuilder.unstarted(() -> {
+                Task.ioIntensiveOp(j);
+                taskCountDown.countDown();
+            });
+            thread.start();
+        }
+
+        taskCountDown.await();
+    } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+    }
+}
+```
+
+If we run the method `main()` we will get the following:
+
+```bash
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :com.bodera.section01.InboundOutboundTaskDemo.main()
+
+10:33:21.785 [bodera.virtual7] INFO com.bodera.section01.Task -- starting I/O task: 6
+10:33:21.785 [bodera.virtual2] INFO com.bodera.section01.Task -- starting I/O task: 1
+10:33:21.785 [bodera.virtual8] INFO com.bodera.section01.Task -- starting I/O task: 7
+10:33:21.785 [bodera.virtual1] INFO com.bodera.section01.Task -- starting I/O task: 0
+10:33:21.785 [bodera.virtual9] INFO com.bodera.section01.Task -- starting I/O task: 8
+10:33:21.785 [bodera.virtual6] INFO com.bodera.section01.Task -- starting I/O task: 5
+10:33:21.785 [bodera.virtual4] INFO com.bodera.section01.Task -- starting I/O task: 3
+10:33:21.785 [bodera.virtual5] INFO com.bodera.section01.Task -- starting I/O task: 4
+10:33:21.785 [bodera.virtual3] INFO com.bodera.section01.Task -- starting I/O task: 2
+10:33:21.785 [bodera.virtual10] INFO com.bodera.section01.Task -- starting I/O task: 9
+10:33:31.800 [bodera.virtual4] INFO com.bodera.section01.Task -- ending I/O task: 3
+10:33:31.801 [bodera.virtual2] INFO com.bodera.section01.Task -- ending I/O task: 1
+10:33:31.801 [bodera.virtual10] INFO com.bodera.section01.Task -- ending I/O task: 9
+10:33:31.803 [bodera.virtual3] INFO com.bodera.section01.Task -- ending I/O task: 2
+10:33:31.803 [bodera.virtual6] INFO com.bodera.section01.Task -- ending I/O task: 5
+10:33:31.803 [bodera.virtual9] INFO com.bodera.section01.Task -- ending I/O task: 8
+10:33:31.803 [bodera.virtual7] INFO com.bodera.section01.Task -- ending I/O task: 6
+10:33:31.803 [bodera.virtual8] INFO com.bodera.section01.Task -- ending I/O task: 7
+10:33:31.803 [bodera.virtual1] INFO com.bodera.section01.Task -- ending I/O task: 0
+10:33:31.804 [bodera.virtual5] INFO com.bodera.section01.Task -- ending I/O task: 4
+
+BUILD SUCCESSFUL in 10s
+
+Process finished with exit code 0
+```
+
+Virtual threads are **unnamed by default**. We can name them by using the `Thread.Builder.OfVirtual.name()` method.
+
+Now where they really shines is about resource management. Remember when we get out of limits when creating tons of platform threads? Virtual threads are the perfect solution for that, also known as fibers or green threads, they are lightweight threads that run on top of a single operating system thread. They are scheduled by the Java Virtual Machine (JVM) and do not have a direct mapping to a native thread. This means that virtual threads do not run in parallel with the main thread in the classical sense, but rather are executed by the JVM in a way that mimics parallelism.
 

@@ -14,7 +14,7 @@ public class Task {
         try {
             LOGGER.info("starting I/O task: {}", i);
 
-            Thread.sleep(Duration.ofSeconds(10));
+            Thread.sleep(Duration.ofSeconds(60));
 
             LOGGER.info("ending I/O task: {}", i);
         } catch (InterruptedException e) {
