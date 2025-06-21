@@ -339,3 +339,173 @@ Virtual threads are **unnamed by default**. We can name them by using the `Threa
 
 Now where they really shines is about resource management. Remember when we get out of limits when creating tons of platform threads? Virtual threads are the perfect solution for that, also known as fibers or green threads, they are lightweight threads that run on top of a single operating system thread. They are scheduled by the Java Virtual Machine (JVM) and do not have a direct mapping to a native thread. This means that virtual threads do not run in parallel with the main thread in the classical sense, but rather are executed by the JVM in a way that mimics parallelism.
 
+## How virtual threads work
+
+Okay, Java virtual threads are simply an illusion provided by Java:
+
+- It will look like a thread
+- It will accept a `Runnable`
+- We can do `thread.start()` and `thread.join()` as usual
+
+But the underlying operating system cannot see/schedule them! If the underlying OS doesn't handle virtual threads then how does it work?
+
+To understand virtual threads, let's consider the following example:
+
+![Your machine consisting in a Java Code, RAM, and a single core CPU](./img/how-virtual-threads-works-pt1.png)
+
+Your machines consist in the parts shown in the figure above. Whatever the code we write, object-oriented programming, functional style, reactive programming, all those things do not matter to the OS, programming paradigm only matters for us developers not for the OS.
+
+So the programming languages are an interface in which we interact with the OS to pass some given set of instructions to perform.
+
+In our first demo, the `platformThreadDemo()`, we were trying to create thousands of Java threads. And Java threads are the same as platform threads, so because of that it was trying to create too many OS threads, then the OS itself started providing some kind of restriction blocking our app to invoke the creation of more threads.
+
+![Many platform threads](./img/how-virtual-threads-works-pt2.png)
+
+Now the thing is, when we create virtual threads they are just like regular objects like this one:
+
+```java
+Person p = new Person("Alice");
+```
+
+By looking at the statement above, we should no worry about creating thousands instances of `Person` in a loop, right? We could store them in data structure similar to an `ArrayList` or something related.
+
+Similarly, the virtual threads are not platform threads, so nothing is created in the OS level! They are like tiny objects we create in the heap memory.
+
+![How virtual threads work](./img/how-virtual-threads-works-pt3.png)
+
+To understand virtual thread, we should stop seeing them as `Thread`, instead we should start seeing them as `Task`.
+
+Those virtual threads, they accept a `Runnable`, right? So they all hold some kind of actions to be executed. It will look like we are using a thread, that we are even starting a new thread and doing something with the thread. However, whenever we call `Thread.Builder.OfVirtual.start()`, all those tasks, those virtual threads, they are going to be added to a **queue** on the RAM.
+
+![Virtual threads behave like tasks](./img/how-virtual-threads-works-pt4.png)
+
+If the OS processor cannot be aware of the existence of virtual threads then it cannot execute them on its own. They belong to a _fork-join pool_, not the common pool of threads. The number of threads in this _fork-join pool_ depends on the number of processors we have in our machine. Consider that due to our single core CPU in our example, the _fork-join pool_ is going to be a single thread, a **platform thread**. This dedicated platform thread will take the tasks from the queue and will start executing them.
+
+So behind the scenes, all the virtual threads, everything is getting executed by a platform thread. How many platform threads will be used for that depends on the number of processors available on the machine.
+
+But as part of the `Runnable` we had given `Thread.sleep()`, if the platform thread is what is actually executing that task, then this platform thread should be blocked, right? How come we were able to execute millions of `Thread.sleep()` in parallel? Sounds unreasonable, right?
+
+This is where Java does it magic.
+
+![Virtual threads behaviour with platform threads](./img/how-virtual-threads-works-pt5.png)
+
+Ok, the platform thread will pick up the task and will start executing whenever it sees a `Thread.sleep()` or some kind of network call, whenever it detects this type of blocking, what it will do is take that task and put it back into the **heap**, we call that action __"parking"__. The ultimate goal is that the platform thread should never be blocked, as long as there are available tasks on the **queue**, the platform thread will start executing them and when it detects some blocking call or network call, it stages the idle task back into the heap till the response comes back.
+
+![Carrier thread and parking](./img/how-virtual-threads-works-pt6.png)
+
+We name these platform threads as _"carrier threads"_. Since the virtual threads are tiny objects in the heap, and they cannot be directly executed on its own, the virtual threads will have to be __mounted__ on a carrier thread to execute their task.
+
+Then we will be executing the task as part of the `Runnable`. Let's imagine that we're calling a remote service `ProductService` to get the product information. So we will be sending a request to the product service to get the product information, since it's a network call, it might take some time, so we will not be waiting till the response comes back. The virtual thread that performed that call will be __unmounted__ and then __parked__ back into the queue. Then the next available virtual thread on the queue will be mounted again to get executed. The strategy consists in not letting the carrier thread to be set idle, repeating this process over and over.
+
+What happens if the response comes back? Then we're going to __unpark__ the virtual thread by adding it back to the __queue__ so that it can be __mounted__ on a carrier thread again to execute its task. It will continue from the place where it stopped.
+
+We're going to get in details on how this work further on our lectures, but in a high level, this is how the virtual threads are getting scheduled for the execution.
+
+If the virtual thread is mounted on a carrier thread, and if the carrier thread is what is executing the task, then we have some methods like:
+
+```java
+Thread.currentThread().getName();
+Thread.currentThread().getState();
+```
+
+If we call upon these methods, what will be the output? Would we get the virtual thread name and state, or the carrier thread name and state? That's a very good question.
+
+Okay, so the virtual thread is mounting on a carrier thread and all its implementation details. You and I are the Java developers, so basically we are the users of the Java platform ok. For us there are two threads, one is virtual, the other one is platform. So the Java is trying to provide the magic illusion behind the scenes for us, but in this case when we are using virtual threads in our code, we should be getting the virtual thread name and state. But how does it happen?
+
+Check out the following code from the `VirtualThread.mount()` method:
+
+```java
+/**
+ * Mounts this virtual thread onto the current platform thread. On
+ * return, the current thread is the virtual thread.
+ */
+@ChangesCurrentThread
+@ReservedStackAccess
+private void mount() {
+    // sets the carrier thread
+    Thread carrier = Thread.currentCarrierThread();
+    setCarrierThread(carrier);
+
+    // sync up carrier thread interrupt status if needed
+    if (interrupted) {
+        carrier.setInterrupt();
+    } else if (carrier.isInterrupted()) {
+        synchronized (interruptLock) {
+            // need to recheck interrupt status
+            if (!interrupted) {
+                carrier.clearInterrupt();
+            }
+        }
+    }
+
+    // set Thread.currentThread() to return this virtual thread
+    carrier.setCurrentThread(this);
+}
+```
+
+After mounting the virtual thread on a carrier thread, we are also modifying the carrier thread on this line `carrier.setCurrentThread(this);`. This process is reverted when we call `VirtualThread.unmount()`.
+
+If we look at `Thread.sleep()`, the actual Java source code looks like this:
+
+```java
+public static void sleep(long nanos) throws InterruptedException {
+    if (currentThread() instanceof VirtualThread vthread) {
+        vthread.sleepNanos(nanos); // if is virtual sleep this way
+    } else {
+        sleep0(nanos); // if is platform sleep this way
+    }
+}
+```
+
+The native `sleep0()` is a native method call where we ask the OS to not schedule the current thread for given nanoseconds. So that any further instructions will not be executed for the given nanoseconds. This is a blocking operation.
+
+The `sleepNanos()` method on other hand performs another call to the `parkNanos()` methods to park the current virtual thread for the given nanoseconds. Inside there it will also immediately schedule unparking after the given nanoseconds by calling this:
+
+```java
+Future<?> parker = scheduleUnpark(this::unpark, nanos);
+```
+
+Again, that task will be taken and added to the queue after the given nanoseconds. This is how virtual threads looks like in slept state. The Java team have modified hundreds of files for us.
+
+Now what about the stack memory? Threads will have something like a stack memory right, so those virtual threads are supposed to have something like that too. Do they have or not? We will explain that in the next lecture.
+
+### A note about virtual threads and fork-join pool
+
+The fork-join pool is a type of executor service in Java that's designed to efficiently execute tasks that can be divided into smaller sub-tasks. It's particularly useful for parallelizing computationally intensive tasks.
+
+In the context of Java virtual threads (also known as _"fibers"_ or _"green threads"_), a fork-join pool can be used to execute tasks that are scheduled on a dedicated platform thread. This means that the fork-join pool will use a native thread to execute the tasks, but the tasks themselves will be executed as virtual threads.
+
+The idea is that the platform thread will act as a "carrier" for the virtual threads, allowing them to run on the native thread while still providing the benefits of virtual threads, such as lightweight scheduling and reduced memory overhead.
+
+By using a fork-join pool with virtual threads, you can take advantage of the efficiency and scalability of parallel processing while minimizing the overhead of thread creation and management.
+
+```java
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveTask;
+
+public class VirtualThreadExample extends RecursiveTask<Integer> {
+    // ...
+
+    public static void main(String[] args) {
+        ForkJoinPool pool = new ForkJoinPool();
+        VirtualThreadExample task = new VirtualThreadExample();
+        pool.invoke(task);
+    }
+}
+```
+
+Note that this is just a brief overview, and there are many more details to explore when working with fork-join pools and virtual threads in Java.
+
+By default, a `ForkJoinPool` will use a target parallelism level that's equal to the number of available processors, which is typically the number of cores on your machine. However, the actual number of platform threads used by the pool can vary depending on the workload and the configuration of the pool.
+
+In your case, if you have 10 processors available, the `ForkJoinPool` will likely use a target parallelism level of 10, which means it will try to use up to 10 platform threads to execute tasks concurrently. However, the pool may not always use all 10 threads simultaneously, and it may also use more threads than the target parallelism level if the workload requires it.
+
+You can also configure the parallelism level of the `ForkJoinPool` explicitly by passing a value to the constructor, like this:
+
+```java
+ForkJoinPool pool = new ForkJoinPool(10);
+```
+
+This sets the target parallelism level to 10, but again, the actual number of platform threads used by the pool may vary.
+
+It's worth noting that `ForkJoinPool` uses a technique called _"work-stealing"_ to manage its threads, which means that idle threads will actively search for work to do, and busy threads will try to offload work to idle threads. This helps to ensure that the pool is using its threads efficiently, even if the workload is uneven.
