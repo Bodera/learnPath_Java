@@ -41,7 +41,9 @@ public class InboundOutboundTaskDemo {
 
         //smallVirtualThreadSync();
 
-        hugeVirtualThreadSync(); // Try increase to one million and set 1 minute on Thread.sleep at Task.java
+        //hugeVirtualThreadSync(); // Try increase to one million and set 1 minute on Thread.sleep at Task.java
+
+        smallVirtualThreadSync();
     }
 
     private static void smallPlatformThreadNonDaemon() {
@@ -55,7 +57,7 @@ public class InboundOutboundTaskDemo {
     private static void threadStarter(int numberOfThreads) {
         Thread.Builder.OfPlatform threadBuilder = Thread.ofPlatform().name("bodera", 1);
 
-        for (int i = 0; i < numberOfThreads; i++) {
+        for (int i = 1; i <= numberOfThreads; i++) {
             int j = i;
 
             Thread thread = threadBuilder.unstarted(() -> Task.ioIntensiveOp(j));
@@ -78,7 +80,7 @@ public class InboundOutboundTaskDemo {
     private static void threadStarterDaemon(int numberOfThreads) {
         Thread.Builder.OfPlatform threadBuilder = Thread.ofPlatform().daemon().name("bodera.daemon", 1);
 
-        for (int i = 0; i < numberOfThreads; i++) {
+        for (int i = 1; i <= numberOfThreads; i++) {
             int j = i;
 
             Thread thread = threadBuilder.unstarted(() -> Task.ioIntensiveOp(j));
@@ -139,7 +141,7 @@ public class InboundOutboundTaskDemo {
             CountDownLatch taskCountDown = new CountDownLatch(numberOfThreads);
             Thread.Builder.OfVirtual threadBuilder = Thread.ofVirtual().name("bodera.virtual", 1);
 
-            for (int i = 0; i < numberOfThreads; i++) {
+            for (int i = 1; i <= numberOfThreads; i++) {
                 int j = i;
 
                 Thread thread = threadBuilder.unstarted(() -> {

@@ -12,11 +12,11 @@ public class Task {
     public static void ioIntensiveOp(int i) {
 
         try {
-            LOGGER.info("starting I/O task: {}", i);
+            LOGGER.info("starting I/O task: {}. Thread info: {}", i, Thread.currentThread());
 
-            Thread.sleep(Duration.ofSeconds(60));
+            Thread.sleep(Duration.ofSeconds(10));
 
-            LOGGER.info("ending I/O task: {}", i);
+            LOGGER.info("ending I/O task: {}. Thread info: {}", i, Thread.currentThread());
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
