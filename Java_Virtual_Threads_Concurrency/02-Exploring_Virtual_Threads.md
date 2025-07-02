@@ -658,3 +658,59 @@ By using virtual threads, you can write concurrent code that's more concise, rea
 
 There is no guarantee that the same worker/carrier thread will be doing all the execution for the virtual thread.
 
+## Virtual threads and Stack memory
+
+Now let's discuss how the stack memory work with virtual threads, because we know that platform threads will have something called **stack memory** to store the local method variables, method calls information, etc. But what about virtual threads? How this data is keep in memory for virtual threads?
+
+- Platforms threads have **fixed stack**. (1MB, 2MB, ...)
+
+Even though we can adjust the stack size, remember that the size has to be given upfront before we create them. Once the platform thread is created we cannot adjust the stack size anymore, and it has to be a reasonable size.
+
+- Virtual threads do NOT have fixed stack. They have **resizable stack**.
+  - Stack Chunk Object
+
+The way in which it works have to be visualized with the following figure:
+
+![Virtual threads stack memory pt1](./img/virtual-threads-stack-memory-pt1.png)
+
+Imagine that the virtual thread class is implemented like that pseudocode which accepts a `Runnable` that represents the task to be executed, and they have internally an object called `VirtualStack`.
+
+Based on that class we create three virtual threads, which means three tasks to be executed right. We allocate those objects in the heap. The blue boxes are the runnable tasks, and the white ones are the virtual stack that is always initialized as null, since the task is not yet executed.
+
+Then we have in our example a single processor. The long box corresponds to the carrier thread and the short box corresponds to the available stack memory for the carrier thread (a fixed stack of 1MB or 2MB, doesn't really matter for now).
+
+So when we say `Thread.start()` our virtual threads will be added to a queue for execution, and they're ready to be picked up by a carrier thread for the execution.
+
+![Virtual threads stack memory pt2](./img/virtual-threads-stack-memory-pt2.png)
+
+Let's imagine that the carrier thread picked up the first task to start executing it. It loads the runnable, or start the virtual thread task as part of the runnable, and maybe we are creating a lot of objects inside, and also having a lot of methods to be called one by one. So, on behalf of the virtual thread, we will be doing everything.
+
+During the execution, the method call information object references, everything has to be stored in the stack, thus our carrier thread will be using its stack memory. Like the red box in the figure below.
+
+![Virtual threads stack memory pt3](./img/virtual-threads-stack-memory-pt3.png)
+
+Now it has 1GB of stack memory, but probably it would have utilized 10KB or 100KB depending on the task we have inside the runnable. Just keep in mind that all relevant data to the task will be written on the stack (method calls, object references, stack trace, etc.).
+
+During the execution, let's imagine that in the middle of the runnable we have to call a `ProductService` to get some product data. On behalf of the virtual thread the carrier thread will now perform a network call by sending a request to the `ProductService`.
+
+![Virtual threads stack memory pt4](./img/virtual-threads-stack-memory-pt4.png)
+
+It sends the request, then the platform/carrier thread will immediately realize - "Okay, this is a blocking call, I do not want to be blocked." - What it will do is transfer all that previous information gathered in the stack memory to the that tiny white box on the left side, before performing the **park**.
+
+![Virtual threads stack memory pt5](./img/virtual-threads-stack-memory-pt5.png)
+
+After completing the parking process, the stack memory will be cleaned because whatever it was storing doesn't belong to the carrier thread anymore, it belongs to the virtual thread that is now in the heap. A little recap, virtual thread executes and the carrier thread notices a blocking I/O call, it allocates the virtual thread and its related stack information on the heap before parking then, after that the carrier thread will pick the next task for the execution, and repeating this process over and over again.
+
+Eventually, for each and every virtual thread, the corresponding stack information will be filled as part of the `VirtualThread` object itself (the pseudocode class). So the stack is now part of the heap, and each virtual thread has its own stack (one has 1KB, other has 250KB, etc.), this is why virtual threads have resizable stack memory.
+
+![Virtual threads stack memory pt6](./img/virtual-threads-stack-memory-pt6.png)
+
+Depending on the task we are executing they do not have a fixed memory, and they also become part of the heap. That's why virtual threads have resizable stack memory. It's worth noting that the stack memory is not necessarily resized dynamically. Instead, the Java runtime may allocate a larger or smaller stack size for each virtual thread based on the specific requirements of the task being executed.
+
+Now you might wonder, after we have done all the parking, and sent messages to the `ProductService`, what will happen when we get the response back?
+
+![Virtual threads stack memory pt7](./img/virtual-threads-stack-memory-pt7.png)
+
+Well, once we get the response back, some carrier thread will unpark the virtual thread, and it goes back to the queue to continue the execution. It has to start from the place where it has stopped right? To be able to doing so, the carrier thread will not be losing the context because once it picks the task, every piece of relevant information (methods, object variable, etc.) will be restored back to the stack and then the task will be continued. Due to the object that contains a reference to the stack `VirtualStack` we will not be losing the context.
+
+That does not come for free, it has some cost involved, however this is better than managing thousands of platform threads.
