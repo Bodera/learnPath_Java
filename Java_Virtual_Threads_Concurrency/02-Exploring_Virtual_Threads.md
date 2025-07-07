@@ -714,3 +714,205 @@ Now you might wonder, after we have done all the parking, and sent messages to t
 Well, once we get the response back, some carrier thread will unpark the virtual thread, and it goes back to the queue to continue the execution. It has to start from the place where it has stopped right? To be able to doing so, the carrier thread will not be losing the context because once it picks the task, every piece of relevant information (methods, object variable, etc.) will be restored back to the stack and then the task will be continued. Due to the object that contains a reference to the stack `VirtualStack` we will not be losing the context.
 
 That does not come for free, it has some cost involved, however this is better than managing thousands of platform threads.
+
+## Exploring Threads Stack Trace
+
+Let's explore a demo where we're going to have a chain of method calls, and a few exceptions will be thrown along the way. We expect to see the stack trace in the logs from the virtual threads.
+
+First we're going to define a utility class to encapsulate the call to `Thread.sleep()`, so we don't have to worry about the `InterruptedException` on the main thread.
+
+```java
+public class ThreadUtils {
+
+    public static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+Our `Task` class will be defined as follows:
+
+```java
+public class Task {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Task.class);
+
+    public static void execute(int i) {
+        LOGGER.info("stating task {}", i);
+
+        try {
+            method1(i);
+        } catch (Exception e) {
+            LOGGER.error("error for {}", i, e);
+        }
+
+        LOGGER.info("ending task {}", i);
+    }
+
+    public static void method1(int i) {
+        ThreadUtils.sleep(Duration.ofMillis(300));
+
+        try {
+            method2(i);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void method2(int i) {
+        ThreadUtils.sleep(Duration.ofMillis(100));
+        method3(i);
+    }
+
+    public static void method3(int i) {
+        ThreadUtils.sleep(Duration.ofMillis(500));
+
+        if (i != 4) return;
+
+        throw new IllegalArgumentException("i cannot be 4.");
+    }
+}
+```
+
+And our main class will be defined as follows:
+
+```java
+public class StackTraceDemo {
+
+    public static void main(String[] args) {
+        
+    }
+
+    private static void demo(Thread.Builder builder) {
+        for (int i = 1; i <= 20; i++) {
+            int j = i;
+
+            builder.start(() -> Task.execute(j));
+        }
+    }
+}
+```
+
+First we're going to experiment platform threads.
+
+```java
+public class StackTraceDemo {
+
+    public static void main(String[] args) {
+
+        demo(Thread.ofPlatform());
+    }
+}
+```
+
+As output, we get:
+
+```
+01:19:59.699 [Thread-11] INFO com.bodera.section02.Task -- stating task 12
+01:19:59.699 [Thread-14] INFO com.bodera.section02.Task -- stating task 15
+01:19:59.699 [Thread-10] INFO com.bodera.section02.Task -- stating task 11
+01:20:00.630 [Thread-11] INFO com.bodera.section02.Task -- ending task 12
+01:20:00.630 [Thread-15] INFO com.bodera.section02.Task -- ending task 16
+01:20:00.630 [Thread-12] INFO com.bodera.section02.Task -- ending task 13
+01:20:00.630 [Thread-3] ERROR com.bodera.section02.Task -- error for 4
+java.lang.RuntimeException: java.lang.IllegalArgumentException: i cannot be 4.
+	at com.bodera.section02.Task.method1(Task.java:34)
+	at com.bodera.section02.Task.execute(Task.java:20)
+	at com.bodera.section02.StackTraceDemo.lambda$demo$0(StackTraceDemo.java:13)
+	at java.base/java.lang.Thread.run(Thread.java:1583)
+Caused by: java.lang.IllegalArgumentException: i cannot be 4.
+	at com.bodera.section02.Task.method3(Task.java:48)
+	at com.bodera.section02.Task.method2(Task.java:40)
+	at com.bodera.section02.Task.method1(Task.java:32)
+	... 3 common frames omitted
+Caused by: java.lang.IllegalArgumentException: i cannot be 4.
+
+01:20:00.633 [Thread-3] INFO com.bodera.section02.Task -- ending task 4
+```
+
+As we expected our threads has ended and when `i` was 4, the exception was thrown. Normally this is how we will be seeing some error stack trace and that's all right for debugging purposes.
+
+Now let's experiment virtual threads.
+
+```java
+public class StackTraceDemo {
+
+    public static void main(String[] args) {
+
+        demo(Thread.ofVirtual());
+    }
+}
+```
+
+As output, we get:
+
+```
+1:26:14 AM: Executing ':com.bodera.section02.StackTraceDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+> Task :com.bodera.section02.StackTraceDemo.main()
+
+BUILD SUCCESSFUL in 779ms
+2 actionable tasks: 2 executed
+1:26:15 AM: Execution finished ':com.bodera.section02.StackTraceDemo.main()'.
+```
+
+We know that virtual threads are the same as daemon threads, right? We have to block the execution somehow.
+
+```java
+public class StackTraceDemo {
+
+    public static void main(String[] args) {
+
+        demo(Thread.ofVirtual());
+        ThreadUtils.sleep(Duration.ofSeconds(2));
+    }
+}
+```
+
+As output, we get:
+
+```
+01:28:25.470 [bodera-virtual-16] INFO com.bodera.section02.Task -- stating task 16
+01:28:25.470 [bodera-virtual-19] INFO com.bodera.section02.Task -- stating task 19
+01:28:25.470 [bodera-virtual-20] INFO com.bodera.section02.Task -- stating task 20
+01:28:26.409 [bodera-virtual-2] INFO com.bodera.section02.Task -- ending task 2
+01:28:26.409 [bodera-virtual-10] INFO com.bodera.section02.Task -- ending task 10
+01:28:26.409 [bodera-virtual-14] INFO com.bodera.section02.Task -- ending task 14
+01:28:26.410 [bodera-virtual-4] ERROR com.bodera.section02.Task -- error for 4
+java.lang.RuntimeException: java.lang.IllegalArgumentException: i cannot be 4.
+	at com.bodera.section02.Task.method1(Task.java:34)
+	at com.bodera.section02.Task.execute(Task.java:20)
+	at com.bodera.section02.StackTraceDemo.lambda$demo$0(StackTraceDemo.java:19)
+	at java.base/java.lang.VirtualThread.run(VirtualThread.java:309)
+Caused by: java.lang.IllegalArgumentException: i cannot be 4.
+	at com.bodera.section02.Task.method3(Task.java:48)
+	at com.bodera.section02.Task.method2(Task.java:40)
+	at com.bodera.section02.Task.method1(Task.java:32)
+Caused by: java.lang.IllegalArgumentException: i cannot be 4.
+
+	... 3 common frames omitted
+01:28:26.412 [bodera-virtual-4] INFO com.bodera.section02.Task -- ending task 4
+```
+
+Again we've started 20 threads in parallel, and they all got executed, and there we've got the same similar exception but this time from a virtual thread with stack trace.
+
+The first run from the platform thread we have this line:
+
+```
+at java.base/java.lang.Thread.run(Thread.java:1583)
+```
+
+Now with daemon threads we have this line:
+
+```
+at java.base/java.lang.VirtualThread.run(VirtualThread.java:309)
+```
+
+We can conclude that even though our virtual threads got parked and unparked we are still able to get the stack trace for debugging purpose as usual.
