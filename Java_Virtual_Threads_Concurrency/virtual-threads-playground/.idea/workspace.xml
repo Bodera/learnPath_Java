@@ -5,10 +5,10 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="0573b65a-1f13-4a2b-8d6d-fb665fc0f921" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/../02-Exploring_Virtual_Threads.md" beforeDir="false" afterPath="$PROJECT_DIR$/../02-Exploring_Virtual_Threads.md" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/gradle.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/gradle.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/main/java/com/bodera/utils/ThreadUtils.java" beforeDir="false" afterPath="$PROJECT_DIR$/src/main/java/com/bodera/utils/ThreadUtils.java" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/gradle.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/src/main/java/com/bodera/section01/Task.java" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -30,9 +30,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/../.." />
   </component>
-  <component name="ProjectColorInfo">{
-  &quot;associatedIndex&quot;: 3
-}</component>
+  <component name="ProjectColorInfo"><![CDATA[{
+  "associatedIndex": 3
+}]]></component>
   <component name="ProjectId" id="2y1tr4H9udrbcxq3RmISB2cS5Bf" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -43,8 +43,6 @@
     "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
     "Gradle.virtual-threads-playground [:com.bodera.Main.main()].executor": "Run",
     "Gradle.virtual-threads-playground [:com.bodera.section01.InboundOutboundTaskDemo.main()].executor": "Run",
-    "Gradle.virtual-threads-playground [:com.bodera.section02.StackTraceDemo.main()].executor": "Run",
-    "Gradle.virtual-threads-playground [:com.bodera.section03.CPUTaskDemo.main()].executor": "Run",
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
     "RunOnceActivity.git.unshallow": "true",
@@ -54,20 +52,7 @@
     "onboarding.tips.debug.path": "D:/Downloads/repos/learnPath_Java/Java_Virtual_Threads_Concurrency/virtual-threads-playground/src/main/java/com/bodera/Main.java"
   }
 }]]></component>
-  <component name="RunManager" selected="Application.CPUTaskDemo">
-    <configuration name="CPUTaskDemo" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
-      <option name="MAIN_CLASS_NAME" value="com.bodera.section03.CPUTaskDemo" />
-      <module name="virtual-threads-playground.main" />
-      <extension name="coverage">
-        <pattern>
-          <option name="PATTERN" value="com.bodera.section03.*" />
-          <option name="ENABLED" value="true" />
-        </pattern>
-      </extension>
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
+  <component name="RunManager" selected="Application.InboundOutboundTaskDemo">
     <configuration name="InboundOutboundTaskDemo" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
       <option name="MAIN_CLASS_NAME" value="com.bodera.section01.InboundOutboundTaskDemo" />
       <module name="virtual-threads-playground.main" />
@@ -94,23 +79,8 @@
         <option name="Make" enabled="true" />
       </method>
     </configuration>
-    <configuration name="StackTraceDemo" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
-      <option name="MAIN_CLASS_NAME" value="com.bodera.section02.StackTraceDemo" />
-      <module name="virtual-threads-playground.main" />
-      <extension name="coverage">
-        <pattern>
-          <option name="PATTERN" value="com.bodera.section02.*" />
-          <option name="ENABLED" value="true" />
-        </pattern>
-      </extension>
-      <method v="2">
-        <option name="Make" enabled="true" />
-      </method>
-    </configuration>
     <recent_temporary>
       <list>
-        <item itemvalue="Application.CPUTaskDemo" />
-        <item itemvalue="Application.StackTraceDemo" />
         <item itemvalue="Application.InboundOutboundTaskDemo" />
         <item itemvalue="Application.Main" />
       </list>
