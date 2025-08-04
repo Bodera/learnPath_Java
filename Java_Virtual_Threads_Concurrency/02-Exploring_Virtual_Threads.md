@@ -1409,3 +1409,32 @@ PS: check out the output on a second run to see how values are changing.
 01:06:46.303 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 21.41 seconds.
 01:07:08.187 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 21.88 seconds.
 ```
+
+## Virtual Thread Scheduler
+
+- Platform threads are scheduled by the OS Scheduler
+- Virtual threads are scheduled by the JVM
+  - Dedicated `ForkJoinPool` to schedule them.
+
+At this point, we know well that platform threads are scheduled by the OS, whereas the virtual threads are scheduled by the JVM.
+
+When we say `Thread.ofVirtual().start()` our virtual threads will be added to a queue for execution, and they're ready to be picked up by a carrier thread for the execution. For that we have a dedicated thread pool called `ForkJoinPool` to schedule them. By default, this `ForkJoinPool` has threads to match the available number of processors as we already discussed.
+
+### Virtual Thread Scheduler Config
+
+- Dedicated `ForkJoinPool` to schedule Virtual Threads
+  - core pool size = available processors
+  - Carrier threads will NOT be blocked during I/O
+
+If you have 10 processors, then the OS can schedule 10 threads at a time. So to make use of all the system resources, it makes sense to have 10 threads. In this case our carrier threads will not be idle. We know this is the maximum number of threads you can have in the pool (256), in production applications often times you will not have to modify this value.
+
+```java
+// System properties
+jdk.virtualThreadScheduler.parallelism=Runtime.getRuntime().availableProcessors();
+jdk.virtualThreadScheduler.maxPoolSize=256;
+```
+
+We will go with the default configuration, but later we will explore how to modify this configuration to understand some concepts. But again, we will not have to modify this for a production application.
+
+**Parallelism** defines the core pool size. This many threads will be available to take up the tasks. But for some reason threads are in waiting state, stuck for some reason, then the `ForkJoinPool` will use the **maximum pool size** value, and it will create few additional threads to accept that task.
+
