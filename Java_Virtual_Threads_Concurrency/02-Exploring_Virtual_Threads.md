@@ -13,7 +13,7 @@ The code will be updated as we go in the **virtual-threads-playground** project 
 
 ## Our goal
 
-We had discussed already that in the microservices architecture problem, we deal with tons of network calls, often times thread will be blocked, if we try to increase the number of threads then we have to allocate stack size for these threads which is expensive.
+We had discussed already that in the microsservices architecture problem, we deal with tons of network calls, often times thread will be blocked, if we try to increase the number of threads then we have to allocate stack size for these threads which is expensive.
 
 Let's verify if it's really expensive to create threads. Once we know the problem then we can understand the solution better.
 
@@ -311,22 +311,7 @@ If we run the method `main()` we will get the following:
 
 10:33:21.785 [bodera.virtual7] INFO com.bodera.section01.Task -- starting I/O task: 6
 10:33:21.785 [bodera.virtual2] INFO com.bodera.section01.Task -- starting I/O task: 1
-10:33:21.785 [bodera.virtual8] INFO com.bodera.section01.Task -- starting I/O task: 7
-10:33:21.785 [bodera.virtual1] INFO com.bodera.section01.Task -- starting I/O task: 0
-10:33:21.785 [bodera.virtual9] INFO com.bodera.section01.Task -- starting I/O task: 8
-10:33:21.785 [bodera.virtual6] INFO com.bodera.section01.Task -- starting I/O task: 5
-10:33:21.785 [bodera.virtual4] INFO com.bodera.section01.Task -- starting I/O task: 3
-10:33:21.785 [bodera.virtual5] INFO com.bodera.section01.Task -- starting I/O task: 4
-10:33:21.785 [bodera.virtual3] INFO com.bodera.section01.Task -- starting I/O task: 2
-10:33:21.785 [bodera.virtual10] INFO com.bodera.section01.Task -- starting I/O task: 9
-10:33:31.800 [bodera.virtual4] INFO com.bodera.section01.Task -- ending I/O task: 3
-10:33:31.801 [bodera.virtual2] INFO com.bodera.section01.Task -- ending I/O task: 1
-10:33:31.801 [bodera.virtual10] INFO com.bodera.section01.Task -- ending I/O task: 9
-10:33:31.803 [bodera.virtual3] INFO com.bodera.section01.Task -- ending I/O task: 2
-10:33:31.803 [bodera.virtual6] INFO com.bodera.section01.Task -- ending I/O task: 5
-10:33:31.803 [bodera.virtual9] INFO com.bodera.section01.Task -- ending I/O task: 8
-10:33:31.803 [bodera.virtual7] INFO com.bodera.section01.Task -- ending I/O task: 6
-10:33:31.803 [bodera.virtual8] INFO com.bodera.section01.Task -- ending I/O task: 7
+// ....
 10:33:31.803 [bodera.virtual1] INFO com.bodera.section01.Task -- ending I/O task: 0
 10:33:31.804 [bodera.virtual5] INFO com.bodera.section01.Task -- ending I/O task: 4
 
@@ -546,11 +531,7 @@ Sample output:
 ```
 > Task :com.bodera.section01.InboundOutboundTaskDemo.main()
 02:19:49.391 [bodera4] INFO com.bodera.section01.Task -- starting I/O task: 4. Thread info: Thread[#32,bodera4,5,main]
-02:19:49.391 [bodera3] INFO com.bodera.section01.Task -- starting I/O task: 3. Thread info: Thread[#31,bodera3,5,main]
-02:19:49.391 [bodera2] INFO com.bodera.section01.Task -- starting I/O task: 2. Thread info: Thread[#30,bodera2,5,main]
-02:19:49.391 [bodera1] INFO com.bodera.section01.Task -- starting I/O task: 1. Thread info: Thread[#29,bodera1,5,main]
-02:19:49.391 [bodera5] INFO com.bodera.section01.Task -- starting I/O task: 5. Thread info: Thread[#33,bodera5,5,main]
-02:19:49.391 [bodera6] INFO com.bodera.section01.Task -- starting I/O task: 6. Thread info: Thread[#34,bodera6,5,main]
+// ....
 02:19:49.391 [bodera10] INFO com.bodera.section01.Task -- starting I/O task: 10. Thread info: Thread[#38,bodera10,5,main]
 02:19:49.391 [bodera7] INFO com.bodera.section01.Task -- starting I/O task: 7. Thread info: Thread[#35,bodera7,5,main]
 02:19:49.391 [bodera8] INFO com.bodera.section01.Task -- starting I/O task: 8. Thread info: Thread[#36,bodera8,5,main]
@@ -586,14 +567,7 @@ Sample output:
 > Task :com.bodera.section01.InboundOutboundTaskDemo.main()
 02:26:54.141 [bodera.virtual10] INFO com.bodera.section01.Task -- starting I/O task: 10. Thread info: VirtualThread[#39,bodera.virtual10]/runnable@ForkJoinPool-1-worker-10
 02:26:54.141 [bodera.virtual9] INFO com.bodera.section01.Task -- starting I/O task: 9. Thread info: VirtualThread[#38,bodera.virtual9]/runnable@ForkJoinPool-1-worker-9
-02:26:54.141 [bodera.virtual3] INFO com.bodera.section01.Task -- starting I/O task: 3. Thread info: VirtualThread[#32,bodera.virtual3]/runnable@ForkJoinPool-1-worker-3
-02:26:54.141 [bodera.virtual7] INFO com.bodera.section01.Task -- starting I/O task: 7. Thread info: VirtualThread[#36,bodera.virtual7]/runnable@ForkJoinPool-1-worker-7
-02:26:54.141 [bodera.virtual1] INFO com.bodera.section01.Task -- starting I/O task: 1. Thread info: VirtualThread[#29,bodera.virtual1]/runnable@ForkJoinPool-1-worker-1
-02:26:54.141 [bodera.virtual8] INFO com.bodera.section01.Task -- starting I/O task: 8. Thread info: VirtualThread[#37,bodera.virtual8]/runnable@ForkJoinPool-1-worker-8
-02:26:54.141 [bodera.virtual4] INFO com.bodera.section01.Task -- starting I/O task: 4. Thread info: VirtualThread[#33,bodera.virtual4]/runnable@ForkJoinPool-1-worker-4
-02:26:54.141 [bodera.virtual6] INFO com.bodera.section01.Task -- starting I/O task: 6. Thread info: VirtualThread[#35,bodera.virtual6]/runnable@ForkJoinPool-1-worker-6
-02:26:54.141 [bodera.virtual2] INFO com.bodera.section01.Task -- starting I/O task: 2. Thread info: VirtualThread[#31,bodera.virtual2]/runnable@ForkJoinPool-1-worker-2
-02:26:54.141 [bodera.virtual5] INFO com.bodera.section01.Task -- starting I/O task: 5. Thread info: VirtualThread[#34,bodera.virtual5]/runnable@ForkJoinPool-1-worker-5
+// ....
 ```
 
 Let's dissect this a bit more.
@@ -916,3 +890,522 @@ at java.base/java.lang.VirtualThread.run(VirtualThread.java:309)
 ```
 
 We can conclude that even though our virtual threads got parked and unparked we are still able to get the stack trace for debugging purpose as usual.
+
+## CPU intensive tasks with platform threads
+
+Based on our understanding so far about the understanding so far about the platform and daemon threads, what do you think will happen when if we have a CPU intensive task? Here by CPU intensive, consider literally no I/O task.
+
+Let's take the Fibonacci sequence where each number is the sum of the previous two numbers.
+
+```
+0, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, ...
+```
+
+Imagine that we're storing this sequence in an array, and now we're going to pass the position, and we would like to know what is the number in the sequence based on the position. For example, if you're given `5`, then is expected that you return the fifth number in the Fibonacci sequence, in that case it will be `5`. Similarly, if you're given `10`, then it will be `55`, etc.
+
+To simulate an CPU intensive task, we can set up with something like this:
+
+```java
+// 2 ^ N algorithm - intentionally built this way to simulate a CPU intensive task using tons of recursive calls
+public static long findFibonacci(long position) {
+    if (position < 2) {
+        return position;
+    }
+
+    return findFibonacci(position - 1) + findFibonacci(position - 2);
+}
+```
+
+In real life, CPU intensive tasks are presented on different ways, like serialization and deserialization, or image processing, but we can use this algorithm as a starting point.
+
+Before we continue, let's add one more utility method to our `TaskUtils` class which is going to measure how long it takes to execute the runnable.
+
+```java
+public static String measure(Runnable runnable) {
+    long start = System.nanoTime();
+    runnable.run();
+    long end = System.nanoTime();
+
+    double miliseconds = (end - start) / 1_000_000D;
+    return String.format("%.2f", miliseconds / 1000D);
+}
+```
+
+Now let's jump into the code:
+
+```java
+public class Task {
+
+    // 2 ^ N algorithm - intentionally built this way to simulate a CPU intensive task using tons of recursive calls
+    public static long findFibonacci(long position) {
+        if (position < 2) {
+            return position;
+        }
+
+        return findFibonacci(position - 1) + findFibonacci(position - 2);
+    }
+}
+
+public class CPUTaskDemo {
+
+    public static void main(String[] args) {
+        System.out.println(
+            ThreadUtils.measure(() -> Task.findFibonacci(30))
+        );
+    }
+}
+```
+
+As output, we get something like this:
+
+```
+2.89 seconds
+```
+
+Let's enhance our demo a bit:
+
+```java
+public class Task {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Task.class);
+
+    public static void cpuIntensive(int i) {
+        LOGGER.info("starting CPU task. Thread info: {}", Thread.currentThread());
+        var timeTaken = ThreadUtils.measure(() -> findFibonacci(i));
+        LOGGER.info("ending CPU task. Time taken was: {} seconds.", timeTaken);
+    }
+
+    // 2 ^ N algorithm - intentionally built this way to simulate a CPU intensive task using tons of recursive calls
+    public static long findFibonacci(long position) {
+        if (position < 2) {
+            return position;
+        }
+
+        return findFibonacci(position - 1) + findFibonacci(position - 2);
+    }
+}
+
+public class CPUTaskDemo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CPUTaskDemo.class);
+    private static final int TASK_COUNT = 1;
+
+    public static void main(String[] args) {
+
+        demo(Thread.ofPlatform());
+    }
+
+    private static void demo(Thread.Builder builder) {
+        var latch = new CountDownLatch(TASK_COUNT);
+
+        for (int i = 1; i <= TASK_COUNT ; i++) {
+            builder.start(() -> {
+                Task.cpuIntensive(45);
+                latch.countDown();
+            });
+        }
+
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+As output, we get something like this:
+
+```
+> Task :com.bodera.section03.CPUTaskDemo.main()
+03:29:09.721 [Thread-0] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#29,Thread-0,5,main]
+03:29:12.950 [Thread-0] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.22 seconds.
+```
+
+Now let's check what happens when we increase the number of tasks of `TASK_COUNT` to `5`:
+
+```
+> Task :com.bodera.section03.CPUTaskDemo.main()
+03:30:35.764 [Thread-3] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#32,Thread-3,5,main]
+03:30:35.784 [Thread-0] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#29,Thread-0,5,main]
+// ....
+03:30:39.419 [Thread-0] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.64 seconds.
+03:30:39.475 [Thread-4] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.69 seconds.
+```
+
+Okay, basically we've created five threads and every of them are performing the same task, tooking them 3.6 seconds to complete in parallel. Let's review how that's happening behind the scenes.
+
+Remember that the behaviour will change depending on the number of CPUs you have in your machine.
+
+Okay imagine that we have 10 processors on our machine like this:
+
+![CPU Intensive tasks with threads pt1](./img/cpu_intensive_tasks-with-threads-pt1.png)
+
+When we first called the `CPUTaskDemo.demo()` with the thread number `1`, we were passing the CPU intensive task number `45` taking around 3 seconds to complete.
+
+![CPU Intensive tasks with threads pt2](./img/cpu_intensive_tasks-with-threads-pt2.png)
+
+Then we created 5 threads, and each CPU took one thread then start doing the work. They were all doing the work in parallel, so even though we started 5 tasks they all completed in ~3.6 seconds each.
+
+![CPU Intensive tasks with threads pt3](./img/cpu_intensive_tasks-with-threads-pt3.png)
+
+Now let's simplify even more, suppose that we have only one processor in our machine. In that case if we have:
+
+```java
+public class CPUTaskDemo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CPUTaskDemo.class);
+    private static final int TASK_COUNT = Runtime.getRuntime().availableProcessors();
+
+    // ...
+```
+
+The `TASK_COUNT` will be `1` and in that case, only one platform thread was created.
+
+![CPU Intensive tasks with threads pt4](./img/cpu_intensive_tasks-with-threads-pt4.png)
+
+We gave one task to that platform thread execute the CPU intensive task, taking around 3.8 seconds to complete. Since we have only one platform thread, the scheduler was able to schedule the thread to run without any interruption, and the task was being executed continuously taking around 3.8 seconds to complete.
+
+Checkout the logs here:
+
+```bash
+1:18:08 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:18:09.203 [Thread-7] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#36,Thread-7,5,main]
+01:18:09.203 [Thread-0] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#29,Thread-0,5,main]
+01:18:09.203 [Thread-10] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#39,Thread-10,5,main]
+// ....
+01:18:09.203 [Thread-15] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#44,Thread-15,5,main]
+01:18:09.203 [Thread-5] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#34,Thread-5,5,main]
+01:18:09.203 [Thread-19] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#48,Thread-19,5,main]
+01:18:15.909 [Thread-13] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.69 seconds.
+01:18:15.910 [Thread-12] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.70 seconds.
+01:18:15.912 [Thread-5] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.70 seconds.
+// ....
+01:18:16.367 [Thread-10] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.16 seconds.
+01:18:16.379 [Thread-17] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.17 seconds.
+01:18:16.380 [Thread-9] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.17 seconds.
+
+BUILD SUCCESSFUL in 8s
+2 actionable tasks: 2 executed
+1:18:16 AM: Execution finished ':com.bodera.section03.CPUTaskDemo.main()'.
+```
+
+What if we have defined the `TASK_COUNT` to like something like this:
+
+```java
+public class CPUTaskDemo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CPUTaskDemo.class);
+    private static final int TASK_COUNT = 2 * Runtime.getRuntime().availableProcessors();
+```
+
+Now when we doubled the `TASK_COUNT` we became able to create `2` platform threads the scheduler has to schedule `2` threads, but that's not going to happen. The scheduler can schedule only one thread to the processor at a time. What it will do is that it will not wait for the thread one to complete.
+
+What if it never completes? Then it will keep on switching between the thread `1` and thread `2`. First it will give some CPU cycles to thread `1`, this thread will run for some time, then the scheduler will be like - "Okay, you know what, you pass for some time, now I'm going to run this other thread." - and moves to thread `2`.
+
+![CPU Intensive tasks with threads pt5](./img/cpu_intensive_tasks-with-threads-pt5.png)
+
+As you can see, the execution will not be continuous, and the CPU cycles will be shared between the threads. Because of that, by doubling the number of platform threads, the time also going to be doubled.
+
+Checkout the logs here:
+
+```bash
+1:19:47 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:19:47.825 [Thread-16] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#45,Thread-16,5,main]
+01:19:47.825 [Thread-10] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#39,Thread-10,5,main]
+01:19:47.825 [Thread-26] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#55,Thread-26,5,main]
+// ....
+01:19:47.825 [Thread-5] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#34,Thread-5,5,main]
+01:19:47.825 [Thread-2] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#31,Thread-2,5,main]
+01:19:47.825 [Thread-7] INFO com.bodera.section03.Task -- starting CPU task. Thread info: Thread[#36,Thread-7,5,main]
+01:19:59.743 [Thread-4] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 11.90 seconds.
+01:19:59.743 [Thread-12] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 11.85 seconds.
+01:19:59.749 [Thread-14] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 11.91 seconds.
+// ....
+01:20:00.677 [Thread-9] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 12.84 seconds.
+01:20:00.686 [Thread-31] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 12.85 seconds.
+01:20:00.686 [Thread-23] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 12.85 seconds.
+01:20:00.692 [Thread-37] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 12.86 seconds.
+
+BUILD SUCCESSFUL in 13s
+2 actionable tasks: 2 executed
+1:20:00 AM: Execution finished ':com.bodera.section03.CPUTaskDemo.main()'.
+```
+
+Similarly, when you tripled the `TASK_COUNT` based on the available processors, the time also going to be tripled.
+
+![CPU Intensive tasks with threads pt6](./img/cpu_intensive_tasks-with-threads-pt6.png)
+
+## CPU intensive tasks with virtual threads
+
+Now let's play with the virtual threads and see how it goes. Let's change our `main()` method to this:
+
+```java
+public static void main(String[] args) 
+{
+    demo(Thread.ofVirtual());
+}
+```
+
+And let's start with a single task.
+
+```java
+private static final int TASK_COUNT = 1;
+```
+
+As output, we get:
+
+```bash
+1:30:14 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:38:53.040 [virtual-29] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+01:38:56.016 [virtual-29] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 2.96 seconds.
+
+1:30:17 AM: Execution finished ':com.bodera.section03.CPUTaskDemo.main()'.
+```
+
+Here its taking more or less than 3 seconds to complete. Almost the same behaviour as the platform threads for this single task right? What if we do this:
+
+```java
+private static final int TASK_COUNT = 5;
+```
+
+As output, we get:
+
+```bash
+1:32:33 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:39:21.716 [virtual-29] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+01:39:21.716 [virtual-34] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#34]/runnable@ForkJoinPool-1-worker-5
+01:39:21.716 [virtual-32] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#32]/runnable@ForkJoinPool-1-worker-3
+01:39:21.716 [virtual-33] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#33]/runnable@ForkJoinPool-1-worker-4
+01:39:21.716 [virtual-31] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#31]/runnable@ForkJoinPool-1-worker-2
+01:39:25.191 [virtual-34] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.44 seconds.
+01:39:25.199 [virtual-33] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.46 seconds.
+01:39:25.238 [virtual-29] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.50 seconds.
+01:39:25.242 [virtual-31] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.50 seconds.
+01:39:25.254 [virtual-32] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 3.51 seconds.
+
+BUILD SUCCESSFUL in 3s
+```
+
+As you can see, again the time going to be around 3 seconds for the 5 tasks now being run in parallel. Let's try the following:
+
+```java
+private static final int TASK_COUNT = Runtime.getRuntime().availableProcessors();
+```
+
+As output, we get:
+
+```bash
+1:34:38 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:39:59.964 [virtual-43] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#43]/runnable@ForkJoinPool-1-worker-16
+01:39:59.964 [virtual-29] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+// ...
+01:39:59.964 [virtual-47] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#47]/runnable@ForkJoinPool-1-worker-18
+01:39:59.964 [virtual-38] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#38]/runnable@ForkJoinPool-1-worker-9
+01:40:06.708 [virtual-39] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.72 seconds.
+01:40:06.715 [virtual-43] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.74 seconds.
+// ...
+01:40:07.184 [virtual-41] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.21 seconds.
+01:40:07.196 [virtual-33] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.22 seconds.
+
+BUILD SUCCESSFUL in 7s
+```
+
+Now that we're matching the available processors, the time is taking more or less 7 seconds to complete. We can still notice similar performance compared to when we were using platform threads. Let's double the `TASK_COUNT`:
+
+```java
+private static final int TASK_COUNT = 2 * Runtime.getRuntime().availableProcessors();
+```
+
+As output, we get:
+
+```bash
+1:41:03 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:41:04.262 [virtual-38] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#38]/runnable@ForkJoinPool-1-worker-9
+01:41:04.262 [virtual-46] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#46]/runnable@ForkJoinPool-1-worker-18
+// ...
+01:41:11.247 [virtual-31] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 6.97 seconds.
+01:41:04.272 [virtual-68] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#68]/runnable@ForkJoinPool-1-worker-7
+01:41:11.283 [virtual-56] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.01 seconds.
+01:41:04.272 [virtual-66] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#66]/runnable@ForkJoinPool-1-worker-13
+// ...
+01:41:18.348 [virtual-68] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.10 seconds.
+01:41:18.380 [virtual-45] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.40 seconds.
+
+BUILD SUCCESSFUL in 14s
+2 actionable tasks: 2 executed
+1:41:18 AM: Execution finished ':com.bodera.section03.CPUTaskDemo.main()'.
+```
+
+What is most crucial to note here is that we're not creating more threads than we are when creating platform threads. Even though log says `VirtualThread[#48]` the limit of worker thread is still `ForkJoinPool-1-worker-20` which is 20 threads. Only when the task is completed and the worker thread is released, the worker thread picks another task to execute. So we're not able to create more threads than the available processors, but the time is still taking more or less 7 seconds to complete which is better than the average of platform threads which was 13 seconds. Performance wise it looks better, we might think like that, and this interpretation could be misleading and confusing.
+
+Before we explore it more deeply, let's try one more experiment:
+
+```java
+private static final int TASK_COUNT = 3 * Runtime.getRuntime().availableProcessors();
+```
+
+As output, we get:
+
+```bash
+1:52:55 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+01:52:55.588 [virtual-35] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#35]/runnable@ForkJoinPool-1-worker-6
+01:52:55.597 [virtual-62] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#62]/runnable@ForkJoinPool-1-worker-18
+// ...
+01:52:55.597 [virtual-81] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#81]/runnable@ForkJoinPool-1-worker-2
+01:53:10.784 [virtual-69] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.51 seconds.
+01:52:55.597 [virtual-77] INFO com.bodera.section03.Task -- starting CPU task. Thread info: VirtualThread[#77]/runnable@ForkJoinPool-1-worker-15
+01:53:16.455 [virtual-76] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.09 seconds.
+// ...
+01:53:17.831 [virtual-90] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.56 seconds.
+01:53:18.029 [virtual-81] INFO com.bodera.section03.Task -- ending CPU task. Time taken was: 7.31 seconds.
+
+BUILD SUCCESSFUL in 22s
+```
+
+All those tasks were completed under 30 seconds, but they all took around 7 seconds to complete. How does this work? Now, let's quickly discuss the behaviour difference between the platform thread execution and the virtual thread execution.
+
+When we used the platform threads and the `TASK_COUNT` was matching the available number of processors, assuming we had 10 processors on our machine, we have only one platform thread and the execution was continuous like the image shows below.
+
+![How platform threads execute pt1](./img/how-platform-threads-execute-pt1.png)
+
+But when we doubled the `TASK_COUNT`, we were creating underlying two platform threads. So the scheduler will see two threads, so it will have to switch the execution between those two like the image shows below.
+
+![How platform threads execute pt2](./img/how-platform-threads-execute-pt2.png)
+
+The same way, when we tripled the `TASK_COUNT`, we were creating underlying three platform threads. So the scheduler will see three threads, so it will have to switch the execution between those three like the image shows below.
+
+![How platform threads execute pt3](./img/how-platform-threads-execute-pt3.png)
+
+Now when we use virtual threads the execution is quite different. Let's take a look at the image below.
+
+![How virtual threads execute pt1](./img/how-virtual-threads-execute-pt1.png)
+
+As we discussed previously, if you see virtual threads as a thread things will start getting more complex, makes more sense to see them as a task. So when we declare `virtual-thread` nothing really happens on the carrier thread, we just created an object in heap memory. We also know that the number of carrier threads vary based on the number of processors on the host machine. In our example we have only one processor, so we have only one carrier thread.
+
+Ok. Carrier thread picks up the `virtual-thread` to execute it in more or less 3 seconds. The behaviour wise it was exactly like the platform thread. What happens if we double the `TASK_COUNT`?
+
+![How virtual threads execute pt2](./img/how-virtual-threads-execute-pt2.png)
+
+Notice how nothing changed on the carrier thread, we simply created two tasks - doubled the objects in heap memory. So we are still having the scheduler seeing only one carrier thread. So the carrier thread picks up the first task and execute it in more or less 3 seconds, and then the second task is picked up and executed in more or less 3 seconds.
+
+Remember the parking and unparking and all that will come into picture only when we have IO calls or network calls, in such a case the carrier thread will not be blocked, it will pick the next available task during that time by parking the previous task and picking the next one.
+
+This is what happens when we have IO/networks tasks, but our example we haven't such type of task, we have a lot of computation, that's a 100% CPU intensive task. Because of that, the carrier thread will take the first task, execute it continuously in more or less 3 seconds, and once that is done then the second task is picked up and executed continuously in more or less 3 seconds. The scheduler is able to see only one carrier thread, having no clue what are we doing on heap. This explains the behaviour difference between platform threads and virtual threads.
+
+If we have two platform threads, the scheduler will have to switch between them, so execution will take longer, but if we have two virtual threads, the scheduler will not have to switch, the carrier thread will select the tasks from the heap memory and execute them continuously, being more resource efficient.
+
+But what about what we saw on console? We saw that the time take for each one of the virtual threads was 4 seconds and the for the platform threads the time taken was 12 seconds. So we can affirm that virtual threads are a lot faster, platform threads are slower right? It might seem like that, but actually that's not true because the execution, that means the way things are getting executed it's completely different - as you see.
+
+To take the final proof let's perform some measure on time taken in our demo.
+
+```java
+// ...
+
+public static void main(String[] args) {
+    LOGGER.info("Task count: {}", TASK_COUNT);
+
+    for (int i = 0; i < 3; i++) {
+        var totalTimeTaken = timer(() -> demo(Thread.ofVirtual()));
+        LOGGER.info("Total time taken with virtual was {} seconds.", totalTimeTaken);
+        totalTimeTaken = timer(() -> demo(Thread.ofPlatform()));
+        LOGGER.info("Total time taken with platform was {} seconds.", totalTimeTaken);
+    }
+}
+
+// ...
+```
+
+Here we are not interested in the individual task time taken to avoid any kind of confusion due to the behaviour difference between the `Thread.ofPlatform` and `Thread.ofVirtual`.
+
+You might ask why are we executing the `demo()` method three times again and again? It's mainly because Java will slow when it starts the very first time, is like it has to be warmed up, actually it will do a lot of optimization. So usually when Java runs the first round we should be ignoring the time due to warm up and all when we do performance testing. So let's consider just the second and third iteration.
+
+Let me warn you that out simple benchmark is not accurate enough for production grade standards because the computer might be running other softwares like browsers or other programs at the same time, even those will be taking the CPU cycles so they affect our results. But it's enough for learning purposes.
+
+Let's check the output:
+
+```bash
+12:36:40 AM: Executing ':com.bodera.section03.CPUTaskDemo.main()'…
+
+> Task :compileJava
+> Task :processResources NO-SOURCE
+> Task :classes
+
+> Task :com.bodera.section03.CPUTaskDemo.main()
+00:36:42.377 [main] INFO com.bodera.section03.CPUTaskDemo -- Task count: 60
+
+00:37:14.406 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 32.027 seconds.
+00:37:36.718 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 22.311 seconds.
+
+00:37:59.148 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 22.43 seconds
+00:38:22.236 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 23.088 seconds.
+
+00:39:20.304 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 58.068 seconds.
+00:40:31.282 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 70.978 seconds.
+
+BUILD SUCCESSFUL in 3m 50s
+2 actionable tasks: 2 executed
+12:40:31 AM: Execution finished ':com.bodera.section03.CPUTaskDemo.main()'.
+```
+
+This a great example of comparing the performance of virtual threads and platform threads in Java 21.
+
+The reason why the last iteration of platform threads takes longer than the first two iterations is due to the way Java's garbage collection works.
+
+In our code, we're creating many threads (60) and each thread is executing a CPU-intensive task. This creates a lot of temporary objects on the heap, which eventually need to be garbage collected.
+
+In the first two iterations, the garbage collector is able to keep up with the allocation of new objects, and the heap remains relatively small. However, by the third iteration, the heap has grown significantly, and the garbage collector needs to perform a full garbage collection cycle to free up memory.
+
+This full garbage collection cycle is a stop-the-world event, which means that all threads are paused while the garbage collector runs. This pause can be quite long, especially if the heap is large.
+
+Virtual threads, on the other hand, are not affected by this garbage collection pause because they are not scheduled by the operating system. Instead, they are scheduled by the JVM, which can continue to run other virtual threads while the garbage collector is running.
+
+This is why we see a significant increase in the time taken by platform threads in the third iteration, while virtual threads remain relatively consistent.
+
+It's worth noting that this is not a fundamental limitation of platform threads, but rather a consequence of the way Java's garbage collection works. Other languages and runtime environments may behave differently.
+
+Also, it's interesting to see that virtual threads are not always faster than platform threads, as we mentioned. This is because virtual threads have their own overhead, such as the cost of context switching and scheduling. In some cases, platform threads may be faster if the overhead of virtual threads outweighs the benefits of reduced garbage collection pauses.
+
+To conclude, if you have a CPU intensive task, if you modify your application to use virtual threads, things aren't going to be improved magically as you see. You can continue using platform threads if you're currently using. It's not worth the effort to migrate to virtual threads to modify a lot of things. But if you are creating a microservices architecture, and you have lots and lots of network calls, then virtual threads will make more sense.
+
+PS: check out the output on a second run to see how values are changing.
+
+```bash
+01:04:59.884 [main] INFO com.bodera.section03.CPUTaskDemo -- Task count: 60
+01:05:21.452 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 21.56 seconds.
+01:05:41.748 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 20.30 seconds.
+01:06:03.460 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 21.71 seconds.
+01:06:24.893 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 21.43 seconds.
+01:06:46.303 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with virtual was 21.41 seconds.
+01:07:08.187 [main] INFO com.bodera.section03.CPUTaskDemo -- Total time taken with platform was 21.88 seconds.
+```
