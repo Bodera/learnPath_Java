@@ -1438,3 +1438,233 @@ We will go with the default configuration, but later we will explore how to modi
 
 **Parallelism** defines the core pool size. This many threads will be available to take up the tasks. But for some reason threads are in waiting state, stuck for some reason, then the `ForkJoinPool` will use the **maximum pool size** value, and it will create few additional threads to accept that task.
 
+### Scheduling types
+
+When we have multiple threads and a limited processor, all the threads will compete for CPU. However, only one thread can run at a time. We have some scheduling policies to decide which thread to run:
+
+- Preemptive
+- Cooperative
+
+Preemptive scheduling is what our OS scheduler does, and this is what normally you would see for platform threads as they are OS threads. Cooperative scheduling is very difficult to see or achieve with the platform threads, but it is used by virtual threads.
+
+### Preemptive Scheduling
+
+- Preemptive - OS Scheduling policy
+  - CPU is allocated for a limited time
+  - OS can forcibly pause a running thread to give CPU to another thread
+  - Based on thread-priority, time-slice, availability of ready-to-run threads, etc.
+  - Platform threads can have priorities (`thread.setPriority(6)`)
+    - 1 is low priority
+    - 10 is high priority
+    - 5 is default
+  - **Note**:
+    - Preemptive scheduling behavior is platform dependent 
+    - Virtual threads have default priority. Can NOT be modified.
+
+The OS scheduler uses preemptive scheduling. In this case, CPU is allocated for a limited time per thread. Anytime the OS can forcibly pass the running thread and give CPU another thread, the OS scheduler decides this based on few things like thread priority, how long the thread has been running, how many threads are waiting to run, etc.
+
+If there are 1000 threads, it's not fair to run a single thread for one hour, right? So it will try to give chance to all the threads. Thread priority is one of the factors, in Java the platform threads can have priorities, and we have the `setPriority()` method on `Thread` class. Actually often times we will not be doing such things, but the libraries, the frameworks, they might do, but we will not be doing it ok, just to let you aware of this information.
+
+Also, the preemptive scheduling behavior depends on the platform, on the Mac, Windows, they all have their own way of doing things. Since the virtual threads extends the Java `Thread` class, you can also invoke the `setPriority()` method on virtual thread objects. However, it will not modify anything, it always will have the default priority of 5 on them. So imagine we have a single processor, and we have two threads: the scheduler will switch between these two. It will give some time to first thread, after some time it will pause and then give some time to the second thread, then some time will pass, it will again resume the first thread and so on.
+
+The advantage of preemptive scheduling is that, it will give chance to all the threads. So in our example, if a third thread is added to the queue the preemptive scheduling will also give chance to that thread, assuming by the time our first thread already has finished the work, and the second thread has some more work to do, again it will run second thread for some time, then pause it to run the third thread. By the time assuming the second thread finished, and we have no other threads waiting, it will give more CPU time to the third thread. It all depends on the availability of the processor, size of the queue, things like that.
+
+This is how, in a very high level, the preemptive scheduling works. The disadvantage of preemptive scheduling is that we have a lot of context switching.
+
+### Cooperative Scheduling
+
+- CPU is allocated till the execution is completed 
+  - Or the thread should be willing to give CPU to another thread (`Thread.yield()`)
+- Execution is not interrupted/forcibly paused
+- If there is a long-running thread/task, other threads might have to starve.
+
+In the cooperative scheduling the CPU is allocated till the execution is completed. We do not forcibly pass the thread execution. Instead, we let the thread run to complete the job, or the thread itself might be willing to give CPU to another thread. We call this behavior _yielding_, and we will study more about it soon.
+
+So when we go for cooperative scheduling we take task one by one, and we start the execution process. Let's assume that each task will take equal amount of time (just for the sake of abstraction because in real life it might not be the case).
+
+For example, take the Fibonacci sequence position (our previous demo ok), imagine you have received three tasks. The first task is for finding the position for `100`, the second one is for finding the position for `5`, and the third one is for finding the position for `6`. You know well that the 2nd and 3rd threads will not take much time, probably they will finish in few microseconds, but the 1st thread will never complete based on how our implementation. So even though 2nd and 3rd task will not take much time, they cannot be executed because the CPU is being used by 1st thread, and the other threads will have to wait for the completion of the 1st thread. This type of issue will not happen in the preemptive scheduling due to the context switching. This is why it's better to go with the platform threads for a CPU intensive task instead of virtual threads. Virtual threads are very good for IO, not for CPU.
+
+How to implement cooperative scheduling? The thread which has got the CPU, in our example the 1st thread, and has been continuously running, it should be willing to tell the scheduler saying that - "Hey scheduler, you know what? I have been running for a while and need more time to execute. So if are waiting in line, give them a chance. I will continue later.". It has to tell something like that to the scheduler, so at this point the scheduler might consider giving a chance to the other threads. On 1st thread we have a method called `Thread.yield()`, which has been a part of Java distribution for a long time. So even for platform threads you can simply call this method. However, the OS scheduler will ignore this kind of behavior with platform threads. Even in the Java documentation you can see that it's simply a **hint** to the OS scheduler, and OS scheduler often times will ignore this.
+
+But, for virtual threads the scheduler is JVM, is not the OS. So JVM will understand and will accept it. For our example, let's take the 1st thread which looks for Fibonacci position of `100` ok? After some time, after some iterations, maybe in the code we can call `Thread.yield()`, by doing that the carrier thread running on the JVM scheduler, what it will do is realizing that we want to yield and pick 1st thread and put it back at the end of queue, then it will pick the 2nd thread till its completion, then pick the 3rd thread and run it till it finish, and just then it will resume the 1st task back.
+
+This is how the cooperative scheduling works. Basically, each and every thread, they kind of care about the other threads, something like that. They would like to give chance to other threads as well. This is why we call that cooperative scheduling. Again, often times we will never have to call `Thread.yield()` in a production code, unless you are developing a lib/framework for thousands of developers.
+
+### Cooperative Scheduling Demo
+
+Let's now explore how cooperative scheduling works in action. Check out the following code:
+
+```java
+public class CooperativeSchedulingDemo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CooperativeSchedulingDemo.class);
+
+    public static void main(String[] args) {
+        
+        var builder = Thread.ofVirtual();
+
+        var t1 = builder.unstarted(() -> demo(1));
+        var t2 = builder.unstarted(() -> demo(2));
+
+        t1.start();
+        t2.start();
+
+        ThreadUtils.sleep(Duration.ofSeconds(2));
+    }
+
+    private static void demo(int threadNumber) {
+        LOGGER.info("thread-{} started", threadNumber);
+        for (int i = 0; i < 10; i++) {
+            LOGGER.info("thread-{} is printing {}. Thread: {}", threadNumber, i, Thread.currentThread());
+        }
+        LOGGER.info("thread-{} ended", threadNumber);
+    }
+}
+```
+
+Sample output:
+
+```bash
+03:08:56.740 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 started
+03:08:56.744 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 0. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:08:56.740 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 started
+03:08:56.746 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 1. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:08:56.746 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 0. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-2
+03:08:56.748 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 ended
+03:08:56.749 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 9. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-2
+03:08:56.749 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 ended
+```
+
+Notice that both virtual threads are running in parallel. Assuming that the machine running this code has more than a single processor we can see the overlap of execution.
+
+But to see cooperative scheduling better we need limited resources. We need a single processor. So what we can do is we can adjust the virtual thread scheduler configuration to adjust the **pool size**. The following code is intended to make our abstraction more clear:
+
+```java
+static {
+    System.setProperty("jdk.virtualThreadScheduler.parallelism", "1");
+    System.setProperty("jdk.virtualThreadScheduler.maxPoolSize", "1");
+}
+```
+
+By doing that we are adjusting the carrier thread to limit thread pool to a single thread. This means that all virtual threads will be executed by a single thread. The effect is that virtual threads will be executed sequentially, instead of in parallel. This is useful for debugging and testing, but it will limit the performance of the application.
+
+If we run the code again we will get the following output:
+
+```bash
+03:19:40.963 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 started
+03:19:40.968 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 0. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+//...
+03:19:40.968 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 9. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:19:40.969 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 ended
+03:19:40.969 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 started
+03:19:40.969 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 0. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+//...
+03:19:40.970 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 9. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:19:40.971 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 ended
+```
+
+Now the virtual threads are running sequentially, one after the other, because this is how we scheduled them. In our simple for-loop there is no IO involved, 1st thread was picked, so it has to run fully, only then 2nd thread will start. Notice the line telling us `ForkJoinPool-1-worker-1` is the thread that is running both virtual threads.
+
+Now let's make things more interesting. Let's simulate a long time running task ok? Actually our for-loop is too simple, and it is probably taking just milliseconds for Java to run this.
+
+In our case, what we can do is that after a single iteration we can call `Thread.yield()`. Explicitly telling the JVM that we want to yield and give a chance to other threads to run. Like this:
+
+```java
+for (int i = 0; i < 10; i++) {
+    LOGGER.info("thread-{} is printing {}. Thread: {}", threadNumber, i, Thread.currentThread());
+    Thread.yield();
+}
+```
+
+Now we will get the following output:
+
+```bash
+03:28:04.827 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 started
+03:28:04.832 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 0. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:28:04.832 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 started
+03:28:04.832 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 0. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+//...
+03:28:04.835 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 9. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:28:04.835 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 9. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:28:04.836 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 ended
+03:28:04.836 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 ended
+```
+
+We still have only one worker thread `ForkJoinPool-1-worker-1` due to limited resources. The output might give us the idea that our tasks are running in parallel at a time, concurrently. But notice that after 1st thread was created and completed the first iteration it was put back to the queue, so our 2nd thread could run, this process repeats through all iterations. This is due the `yield()` call, where we gave a hint to the JVM scheduler to give CPU to another thread if there is someone waiting on the queue. Remember, in cooperative scheduling the threads do care about each other.
+
+We can now even add some condition on the `yield()` call, like this:
+
+```java
+for (int i = 0; i < 10; i++) {
+    LOGGER.info("thread-{} is printing {}. Thread: {}", threadNumber, i, Thread.currentThread());
+    if (i % 2 == 0) {
+        Thread.yield();
+    }
+}
+```
+
+And we will get the following output:
+
+```bash
+03:37:13.466 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 started
+03:37:13.470 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 0. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:37:13.471 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 started
+03:37:13.471 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 0. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:37:13.471 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 1. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:37:13.471 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 2. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:37:13.471 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 1. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:37:13.472 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 2. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+//...
+03:37:13.474 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 9. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:37:13.474 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 ended
+03:37:13.474 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 9. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:37:13.474 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 ended
+```
+
+Now our threads are still taking turns, but just on even iterations.
+
+And if you want to play a bit more you can add a 3rd thread and modify the `yield()` condition:
+
+```java
+//...
+var t1 = builder.unstarted(() -> demo(1));
+var t2 = builder.unstarted(() -> demo(2));
+var t3 = builder.unstarted(() -> demo(3));
+
+//...
+t3.start();
+
+//...
+for (int i = 0; i < 10; i++) {
+    LOGGER.info("thread-{} is printing {}. Thread: {}", threadNumber, i, Thread.currentThread());
+    if ((i % 2 == 0) && (threadNumber == 1 || threadNumber == 2)) {
+        Thread.yield();
+    }
+}
+```
+
+And we will get the following output:
+
+```bash
+03:43:46.542 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 started
+03:43:46.547 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 0. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:43:46.548 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 started
+03:43:46.548 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 0. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:43:46.548 [virtual-31] INFO section04.CooperativeSchedulingDemo -- thread-3 started
+03:43:46.549 [virtual-31] INFO section04.CooperativeSchedulingDemo -- thread-3 is printing 0. Thread: VirtualThread[#31]/runnable@ForkJoinPool-1-worker-1
+03:43:46.549 [virtual-31] INFO section04.CooperativeSchedulingDemo -- thread-3 is printing 1. Thread: VirtualThread[#31]/runnable@ForkJoinPool-1-worker-1
+//...
+03:43:46.552 [virtual-31] INFO section04.CooperativeSchedulingDemo -- thread-3 is printing 9. Thread: VirtualThread[#31]/runnable@ForkJoinPool-1-worker-1
+03:43:46.552 [virtual-31] INFO section04.CooperativeSchedulingDemo -- thread-3 ended
+03:43:46.552 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 1. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:43:46.552 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 2. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:43:46.553 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 1. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:43:46.553 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 2. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+//...
+03:43:46.555 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 is printing 9. Thread: VirtualThread[#29]/runnable@ForkJoinPool-1-worker-1
+03:43:46.555 [virtual-29] INFO section04.CooperativeSchedulingDemo -- thread-1 ended
+03:43:46.555 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 is printing 9. Thread: VirtualThread[#30]/runnable@ForkJoinPool-1-worker-1
+03:43:46.555 [virtual-30] INFO section04.CooperativeSchedulingDemo -- thread-2 ended
+```
+
+Our 3rd thread never satisfies the `yield()` condition, so it will run till it finished what it has to do before the other threads can resume their execution.
