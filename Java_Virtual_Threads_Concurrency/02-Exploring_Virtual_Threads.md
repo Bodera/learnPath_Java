@@ -1668,3 +1668,49 @@ And we will get the following output:
 ```
 
 Our 3rd thread never satisfies the `yield()` condition, so it will run till it finished what it has to do before the other threads can resume their execution.
+
+## How virtual threads can help
+
+We have been playing with virtual threads for a while. This is for someone who is still confused. You grasped the concepts, but still something is missing - "I do not understand how virtual threads is going to help me.". If that thoughts are running in your mind, no worries, let's see how virtual threads can help us with real problems.
+
+Remember our initial example of a microservices architecture?
+
+![Microservices architecture](./img/microservices-architecture.png)
+
+Let's recall. Imagine that we are receiving a request to process an **order**. We must have to call a **product-service**, a **payment-service**, and the **shipping-service**, etc.
+
+### The Synchronous Blocking Style: A Common Pitfall
+
+When writing code, it's common to follow a synchronous blocking style, where each line of code executes one after the other, waiting for the previous operation to complete. Here's an example:
+
+```java
+Price price = productService.getPrice(productId); // I/O blocking
+PaymentConfirmation payment = paymentService.deductPayment(userId, price); // I/O blocking
+ShippingConfirmation shipping = shippingService.scheduleShipping(userId, productId, quantity); // I/O blocking
+```
+
+In this example, we're making three consecutive network calls, each one blocking the execution of the next line of code. This approach can lead to performance issues, as each call waits for the previous one to complete, causing the thread to be blocked.
+
+### The Problem with Traditional Threads
+
+The issue with this approach is that it can lead to thread blocking, where the platform threads are tied up waiting for I/O operations to complete. This can result in inefficient use of system resources and decreased performance.
+
+### Introducing Virtual Threads: A Solution to Thread Blocking
+
+To overcome this limitation, we can leverage virtual threads. By wrapping our code in a `Runnable`, we can execute it as a single task, allowing the JVM to handle the underlying thread management.
+
+```java
+Runnable task = () -> {
+    Price price = productService.getPrice(productId); // I/O blocking
+    PaymentConfirmation payment = paymentService.deductPayment(userId, price); // I/O blocking
+    ShippingConfirmation shipping = shippingService.scheduleShipping(userId, productId, quantity); // I/O blocking
+};
+
+// Let the virtual thread execute the task
+// During blocking I/O calls, it will be unmounted and next task will be executed
+Thread.ofVirtual().start(task);
+```
+
+### Synchronous Code, Asynchronous Execution
+
+Notice how we can still write our code in a synchronous blocking style, without worrying about the underlying thread management. The JVM takes care of executing our task asynchronously, unmounting the virtual thread during blocking I/O calls and executing the next task in the queue. This approach allows us to write efficient and scalable code, without the need for complex asynchronous programming.
