@@ -1,0 +1,8 @@
+{
+    "java.project.sourcePaths": [
+        "playground\\src"
+    ],
+    "java.project.referencedLibraries": [
+        "playground\\libs\\*.jar"
+    ]
+}
