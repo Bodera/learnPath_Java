@@ -1714,3 +1714,402 @@ Thread.ofVirtual().start(task);
 ### Synchronous Code, Asynchronous Execution
 
 Notice how we can still write our code in a synchronous blocking style, without worrying about the underlying thread management. The JVM takes care of executing our task asynchronously, unmounting the virtual thread during blocking I/O calls and executing the next task in the queue. This approach allows us to write efficient and scalable code, without the need for complex asynchronous programming.
+
+## Thread Synchronization
+
+At this point, we know the basics of the virtual thread, how it works behind the scenes, etc. Now we're going to talk about synchronization. A particular challenge to the virtual thread.
+
+### Platform Thread Synchronization
+
+Just to recap, in Java, thread synchronization refers to the mechanism of controlling access to shared resources by multiple platform threads. When multiple threads try to access the same resource, such as a variable or a method, simultaneously, it can lead to inconsistent results or errors.
+
+Thread synchronization ensures that only one thread can access the shared resource at a time, preventing other threads from interfering with each other. This is achieved through the use of synchronization primitives, such as locks, semaphores, and monitors.
+
+In Java, you can achieve thread synchronization using:
+
+1. `synchronized` keyword: This keyword can be used to synchronize a block of code or a method, ensuring that only one thread can execute it at a time.
+2. `Lock` objects: Java provides a `Lock` interface and its implementations, such as `ReentrantLock`, which can be used to manually lock and unlock resources.
+3. `volatile` keyword: This keyword can be used to ensure that changes to a variable are visible to all threads.
+
+By synchronizing access to shared resources, you can prevent common concurrency issues, such as:
+
+- Data corruption
+- Deadlocks
+- Starvation
+- Livelocks
+
+However, synchronization can also introduce performance overhead, as threads need to wait for each other to release resources. Therefore, it's essential to use synchronization judiciously and only when necessary.
+
+### Virtual Thread Synchronization
+
+We know that a process can have one or more threads. And these threads can talk to one another by using a **shared object**. This communication will be a lot more efficient than having two processes talking to one another by using protocols like HTTP, TCP, etc.
+
+However, the problem in using the shared object with the multiple threads is that **race condition**.
+
+Let's take a simple example:
+
+```java
+public class Counter {
+    private int count = 0;
+
+    public void increment() {
+        count++;
+    }
+
+    public void decrement() {
+        count--;
+    }
+
+    public int getCount() {
+        return count;
+    }
+}
+```
+
+Here we have a `Counter` class and a member variable `count` initialized with zero. One method is responsible for incrementing the value of `count` by 1 and the other method is responsible for decrementing the value of `count` also by 1.
+
+Imagine we're going to create two threads. One thread is going to invoke the `increment()` method and the other thread is going to invoke the `decrement()` method.
+
+We might think that if we start these two threads, then the value of `count` will remain 0. Because one thread is going to increment the value and the other thread is going to decrement it.
+
+However, the output could be `-1`, `0` or `1`. It will be unpredictable. This happens because one thread will not know what the other thread is doing, so the information might be overwritten.
+
+All the multi-thread related challenges like race conditions, deadlocks, etc., are still applicable to virtual threads. Because even though the threads are task objects on heap memory, they are still getting executed by carrier threads ok.
+
+### Racing Condition Demo
+
+Let's check this code:
+
+```java
+public class Lec01RaceCondition {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Lec01RaceCondition.class);
+    private static final List<Integer> intList = new ArrayList<>();
+
+    public static void main(String[] args) {
+        
+        LOGGER.info("starting demo");	
+        demo(Thread.ofPlatform());
+
+        ThreadUtils.sleep(Duration.ofSeconds(1));
+
+        LOGGER.info("intList size: {}", intList.size());
+    }
+
+    private static void demo(Thread.Builder builder) {
+        // create 50 threads
+        for (int i = 0; i < 50; i++) {
+            builder.start(() -> {
+                LOGGER.info("Task started. {}", Thread.currentThread());
+                // do 200 in-memory tasks in each thread
+                for (int j = 0; j < 200; j++) {
+                    inMemoryTask();
+                }
+                LOGGER.info("Task ended. {}", Thread.currentThread());
+            });
+        }
+        // by the end of the program we should have 50 * 200 = 10000 itens in the list
+    }
+
+    private static void inMemoryTask() {
+        intList.add(1);
+    }
+}
+```
+
+What do you think the `intList` size will be at the end of the program?
+
+Output:
+
+```bash
+23:18:57.934 [main] INFO section05.Lec01RaceCondition -- starting demo
+23:19:46.348 [Thread-35] INFO section05.Lec01RaceCondition -- Task started. Thread[#64,Thread-35,5,main]
+23:19:46.348 [Thread-4] INFO section05.Lec01RaceCondition -- Task ended. Thread[#33,Thread-4,5,main]
+//...
+23:19:47.366 [main] INFO section05.Lec01RaceCondition -- intList size: 9827
+```
+
+Look, we got `9827`. This is due to the race condition. The `intList` is getting updated by multiple threads and there is no synchronization between them.
+
+This is not exclusive for platform threads. Let's prove that.
+
+```java
+demo(Thread.ofPlatform());
+```
+
+Output:
+
+```bash
+23:18:57.934 [main] INFO section05.Lec01RaceCondition -- starting demo
+23:19:46.348 [Thread-35] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#74]/runnable@ForkJoinPool-1-worker-13
+23:19:46.348 [Thread-4] INFO section05.Lec01RaceCondition -- Task ended. VirtualThread[#79]/runnable@ForkJoinPool-1-worker-11
+//...
+23:22:40.134 [main] INFO section05.Lec01RaceCondition -- intList size: 9882
+```
+
+This time using virtual threads we got `9882`.
+
+So to fix this we can use the `synchronize` keyword to the `inMemoryTask()` method.
+
+```java
+//...
+demo(Thread.ofPlatform());
+//...
+private static synchronized void inMemoryTask() {
+    intList.add(1);
+}
+```
+
+Output:
+
+```bash
+23:18:57.934 [main] INFO section05.Lec01RaceCondition -- starting demo
+23:19:46.348 [Thread-35] INFO section05.Lec01RaceCondition -- Task started. Thread[#64,Thread-35,5,main]
+23:19:46.348 [Thread-4] INFO section05.Lec01RaceCondition -- Task ended. Thread[#33,Thread-4,5,main]
+//...
+23:19:47.366 [main] INFO section05.Lec01RaceCondition -- intList size: 10000
+```
+
+Other solution that you can try is defining `intList` as a synchronized list, like this:
+
+```java
+// ...
+private static final List<Integer> intList = Collections.synchronizedList(new ArrayList<>());
+// ...
+demo(Thread.ofPlatform());
+// ...
+private static void inMemoryTask() {
+    intList.add(1);
+}
+```
+
+### Synchronization with I/O
+
+So far, so easy right? Let's begin the real challenge, which is synchronizing our code with I/O calls.
+
+```java
+private static final Logger LOGGER = LoggerFactory.getLogger(Lec01RaceCondition.class);
+
+public static void main(String[] args) {
+
+    Runnable printTestMsg = () -> LOGGER.info("*** Test Message ***");
+
+    demo(Thread.ofPlatform());
+    Thread.ofPlatform().start(printTestMsg);
+
+    ThreadUtils.sleep(Duration.ofSeconds(1));
+}
+
+private static void demo(Thread.Builder builder) {
+    // create 50 threads
+    for (int i = 0; i < 50; i++) {
+        builder.start(() -> {
+            LOGGER.info("Task started. {}", Thread.currentThread());
+            ioTask();
+            LOGGER.info("Task ended. {}", Thread.currentThread());
+        });
+    }
+}
+
+private static synchronized void ioTask() {
+    // using sleep to simulate I/O intensive tasks or network calls
+    ThreadUtils.sleep(Duration.ofSeconds(10));
+}
+```
+
+If we run this, out output will be something like this:
+
+```bash
+23:42:58.564 [Thread-46] INFO section05.Lec01RaceCondition -- Task started. Thread[#75,Thread-46,5,main]
+23:42:58.561 [Thread-22] INFO section05.Lec01RaceCondition -- Task started. Thread[#51,Thread-22,5,main]
+//...
+23:42:58.561 [main] INFO section05.Lec01RaceCondition -- *** Test Message ***
+23:42:58.561 [Thread-37] INFO section05.Lec01RaceCondition -- Task started. Thread[#66,Thread-37,5,main]
+23:42:58.561 [Thread-17] INFO section05.Lec01RaceCondition -- Task started. Thread[#46,Thread-17,5,main]
+23:43:08.567 [Thread-46] INFO section05.Lec01RaceCondition -- Task ended. Thread[#75,Thread-46,5,main]
+23:43:18.580 [Thread-4] INFO section05.Lec01RaceCondition -- Task ended. Thread[#33,Thread-4,5,main]
+23:43:28.593 [Thread-38] INFO section05.Lec01RaceCondition -- Task ended. Thread[#67,Thread-38,5,main]
+```
+
+The key insight here is that the synchronized keyword only synchronizes access to the `ioTask()` method, but it doesn't synchronize the entire thread execution. Each thread is still executing independently, and the `synchronized` method only ensures that the `ioTask()` method is executed one thread at a time.
+
+The "Test Message" is logged by the main thread, which is not synchronized with the other threads. This message is logged immediately after the demo method is called, and it's not affected by the synchronization of the `ioTask()` method.
+
+This example illustrates the importance of understanding the scope of synchronization in multithreaded programming. While the `synchronized` keyword can ensure that a specific method is executed one thread at a time, it doesn't necessarily mean that the entire thread execution is synchronized.
+
+Let's modify our code to see the output with virtual threads:
+
+```java
+//...
+public static void main(String[] args) {
+
+    Runnable printTestMsg = () -> LOGGER.info("*** Test Message ***");
+
+    demo(Thread.ofVirtual());
+    Thread.ofVirtual().start(printTestMsg);
+
+    ThreadUtils.sleep(Duration.ofSeconds(1));
+}
+//...
+```
+
+Output:
+
+```bash
+23:54:55.609 [virtual-31] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#31]/runnable@ForkJoinPool-1-worker-2
+23:54:55.608 [virtual-40] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#40]/runnable@ForkJoinPool-1-worker-11
+23:54:55.608 [virtual-47] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#47]/runnable@ForkJoinPool-1-worker-20
+```
+
+The program suddenly finish without ending the tasks it has started and does not even print the "Test Message".
+
+The key insight here is that virtual threads are designed to be lightweight and efficient, but they also have some limitations. One of these limitations is that virtual threads are not guaranteed to run to completion if the main thread exits.
+
+In this case, the main thread is sleeping for 1 second using `ThreadUtils.sleep(Duration.ofSeconds(1))`, but it's not waiting for the virtual threads to complete. As soon as the main thread exits, the program terminates, and the virtual threads are cancelled.
+
+The "Test Message" is not printed because the virtual thread that's supposed to run it is cancelled when the main thread exits. Since the virtual thread is not guaranteed to run to completion, the message is not printed.
+
+This example illustrates an important consideration when working with virtual threads: they are not guaranteed to run to completion if the main thread exits. To ensure that virtual threads complete their tasks, you need to use mechanisms like `Thread.join()` or `CompletableFuture` to wait for their completion.
+
+But let's try removing the `synchronized` keyword from the `ioTask()` method and see if something changes:
+
+```java
+//...
+public static void main(String[] args) {
+
+    Runnable printTestMsg = () -> LOGGER.info("*** Test Message ***");
+
+    demo(Thread.ofVirtual());
+    Thread.ofVirtual().start(printTestMsg);
+
+    ThreadUtils.sleep(Duration.ofSeconds(15));
+}
+//...
+private static void ioTask() {
+    // using sleep to simulate I/O intensive tasks or network calls
+    ThreadUtils.sleep(Duration.ofSeconds(10));
+}
+```
+
+Output:
+
+```bash
+00:03:21.906 [virtual-41] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#41]/runnable@ForkJoinPool-1-worker-13
+00:03:21.916 [virtual-80] INFO section05.Lec01RaceCondition -- *** Test Message ***
+00:03:21.916 [virtual-70] INFO section05.Lec01RaceCondition -- Task started. VirtualThread[#70]/runnable@ForkJoinPool-1-worker-10
+00:03:31.935 [virtual-68] INFO section05.Lec01RaceCondition -- Task ended. VirtualThread[#68]/runnable@ForkJoinPool-1-worker-8
+//...
+```
+
+Suddenly, the "Test Message" is printed, and the program finishes without waiting for the virtual threads to complete. Seems weird, right?
+
+### Pinning threads
+
+Hey, we saw a weird behavior with the virtual thread in the previous lecture. We are going try to discuss why that happened.
+
+Let's do some recap. We can create millions of virtual threads, there is no doubt in that. Once we start it, the virtual threads are scheduled by the JVM, not by the OS. There will be some carrier threads depending on the number of processors. These virtual threads will be mounted on the carrier thread and the carrier thread will run them.
+
+![Virtual thread without synchronization](./img/virtual-thead-without-synchronization.png)
+
+If the execution is pure computation, it will run continuously. If there is an IO task, network call, sleep, etc., then the virtual thread will be unmounted and the next virtual thread will be mounted.
+
+But, there is a challenge here. The unmounting process cannot happen when we have synchronized method. We call that action **pinning**. Pinning a virtual thread on a carrier thread.
+
+![Virtual thread without synchronization](./img/virtual-thead-with-synchronization.png)
+
+It cannot be unmounted until it exits the synchronized method. This is a known limitation as of now. Actually, Java team said in one of their presentations that they would fix it. It's just a temporary problem on early releases of Java 21.
+
+That pinning behavior could happen in the following cases:
+
+1. When you have a `synchronized` method.
+
+```java
+public synchronized void ioTask() {
+    // ...
+}
+```
+
+2. When you have a `synchronized` block.
+
+```java
+public void ioTask() {
+    synchronized (this) {
+        // ...
+    }
+}
+```
+
+3. When you have a JNI (Java Native Interface) method call.
+
+```java
+public void someNativeMethod() {
+    // ...
+}
+```
+
+Just to be clear, synchronized is not bad. We will still have `Collections.synchronizedList(new ArrayList<>())`, etc., to create thread safe list. It's not going away. We can still use them.
+
+The problem is when we have a synchronized block of code, and when we want to execute that using virtual threads. 
+
+If the task you are performing is surrounded by the `synchronized` keyword and is used for heavy in-memory computation, you will not notice any difference if you use virtual threads.
+
+But when you have I/O tasks, or network calls, as part of your synchronized block of code or synchronized method, then the virtual thread cannot be unmounted. Would affect the scaling.
+
+The good news is that there is a workaround to fix this.
+
+But so far we covered situations where we are writing our own code for our application. But what about the third party libraries? How do we know that they are not writing code like this? What will happen? How can we detect this?
+
+#### Update on Java 24
+
+Quick update guys:
+
+- Java 23 or below:
+  - synchronized block/method + io + virtual threads = pinning
+  - JNI + io + virtual threads = pinning
+- Java 24 or above:
+  - synchronized block/method + io + virtual threads = no pinning
+  - JNI + io + virtual threads = pinning
+
+Java 22, 23 and 24 are NOT a LTS release. Current LTS version is 21, and 25 is expected to be released in September 2025.
+
+### Pinning issues with 3rd part libraries.
+
+We're going to discuss the pinning issues with 3rd part libraries. You like virtual threads, but currently you're using many third part libraries, and you're not sure if they are using synchronized blocks, JNI calls, etc. How can you detect this type of issue?
+
+Java provides a system property which you can use to see if your application is pinning virtual threads or not. You can make the following call in your code:
+
+```java
+static {
+    System.setProperty("jdk.tracePinnedThreads", "full");
+}
+```
+
+If you run this code under some scenario where there is a pinning issue, you will see the following output:
+
+```bash
+Thread[#99,ForkJoinPool-1-worker-20,5,CarrierThreads]
+    java.base/java.lang.VirtualThread$VThreadContinuation.onPinned(VirtualThread.java:183)
+    java.base/jdk.internal.vm.Continuation.onPinned0(Continuation.java:393)
+    java.base/java.lang.VirtualThread.parkNanos(VirtualThread.java:621)
+    java.base/java.lang.VirtualThread.sleepNanos(VirtualThread.java:793)
+    java.base/java.lang.Thread.sleep(Thread.java:590)
+    utils.ThreadUtils.sleep(ThreadUtils.java:9)
+    section05.Lec04DetectPinningIssue.ioTask(Lec04DetectPinningIssue.java:40) <== monitors:1
+    section05.Lec04DetectPinningIssue.lambda$1(Lec04DetectPinningIssue.java:32)
+    java.base/java.lang.VirtualThread.run(VirtualThread.java:309)
+```
+
+You can also get a short message by using: 
+
+```java
+static {
+    System.setProperty("jdk.tracePinnedThreads", "short");
+}
+```
+
+Then you will get the following output:
+
+```bash
+Thread[#83,ForkJoinPool-1-worker-4,5,CarrierThreads]
+    section05.Lec04DetectPinningIssue.ioTask(Lec04DetectPinningIssue.java:40) <== monitors:1
+```
