@@ -2113,3 +2113,128 @@ Then you will get the following output:
 Thread[#83,ForkJoinPool-1-worker-4,5,CarrierThreads]
     section05.Lec04DetectPinningIssue.ioTask(Lec04DetectPinningIssue.java:40) <== monitors:1
 ```
+
+## `ReentrantLock`
+
+Let's dive into a workaround for pinning issues. Historically, Java's synchronized keyword was the primary means of achieving thread `synchronization`, dating back to the initial release of Java. However, with the introduction of Java 5, the `ReentrantLock` class was added to the Java Concurrency API, offering a more flexible alternative to `synchronized`. While `ReentrantLock` shares similarities with `synchronized` in terms of providing mutual exclusion, it provides additional features such as lock polling, interruptible locks, and a fairness option, making it a more versatile tool for managing concurrent access to shared resources.
+
+Some notable features of `ReentrantLock` include:
+
+- **Fairness policy**: A thread that has been waiting longer will be given priority to acquire the lock, ensuring that threads are not indefinitely delayed.
+- **TryLock with timeout**: A thread can specify a maximum time to wait for the lock, after which it will either acquire the lock or give up, preventing indefinite waiting.
+
+Let's consider a scenario where 10 threads are competing to acquire a lock on an important method using `synchronized`. The remaining 9 threads will be blocked, waiting for the lock to be released. Now, suppose 100 more threads join the fray, also vying for the lock. With 109 threads waiting, which one will acquire the lock when the first thread exits? Unfortunately, the answer is unpredictable, and it's possible that the thread that arrived first will not get a chance to acquire the lock.
+
+In contrast, `ReentrantLock` offers a fairness policy, which guarantees that the longest-waiting thread will be given priority to acquire the lock. This ensures a more predictable and fair behavior. Additionally, `ReentrantLock` allows threads to specify a timeout when attempting to acquire the lock, preventing indefinite waiting. If the lock cannot be acquired within the specified time, the thread can choose to leave or throw an exception, providing more control over the locking process.
+
+Actually, when using `synchronized`, the JVM does not guarantee any particular order in which threads will acquire the lock. It's not necessarily "totally random," but rather, the JVM is free to choose any thread that is waiting for the lock.
+
+Additionally, when using `ReentrantLock` with fairness policy, the lock will be granted to the longest-waiting thread, but this does not guarantee that the thread will actually acquire the lock immediately. Other threads may still be granted the lock before the longest-waiting thread, depending on the specific implementation and the current state of the lock.
+
+Okay, let's explore `ReentrantLock` in action:
+
+```java
+public class Demo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Demo.class);
+    private static final List<Integer> intList = new ArrayList<>();
+    private static final Lock lock = new ReentrantLock(true);  // true for fairness
+
+    public static void main(String[] args) {
+        
+        LOGGER.info("starting demo");
+        demo(Thread.ofVirtual());
+
+        ThreadUtils.sleep(Duration.ofSeconds(1));
+
+        LOGGER.info("intList size: {}", intList.size());
+    }
+
+    private static void demo(Thread.Builder builder) {
+        // create 50 threads
+        for (int i = 0; i < 50; i++) {
+            builder.start(() -> {
+                LOGGER.info("Task started. {}", Thread.currentThread());
+                // do 200 in-memory tasks in each thread
+                for (int j = 0; j < 200; j++) {
+                    inMemoryTask();
+                }
+                LOGGER.info("Task ended. {}", Thread.currentThread());
+            });
+        }
+        // by the end of the program we should have 50 * 200 = 10000 itens in the list
+    }
+
+    private static void inMemoryTask() {
+        try {
+            lock.lock();
+            intList.add(1);
+        } catch (Exception e) {
+            LOGGER.error("error", e);
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+If we check our output, we will get something like this:
+
+```bash
+02:19:43.336 [main] INFO section05.Lec05ReentrantLock -- intList size: 10000
+```
+
+We're getting exactly 10000 as we expected.
+
+We can also use it to fix our pinning issue with I/O tasks:
+
+```java
+public class Demo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Demo.class);
+    private static final Lock lock = new ReentrantLock(true);
+
+    public static void main(String[] args) {
+
+        Runnable printTestMsg = () -> LOGGER.info("*** Test Message ***");
+
+        demo(Thread.ofVirtual());
+        Thread.ofVirtual().start(printTestMsg);
+
+        ThreadUtils.sleep(Duration.ofSeconds(4));
+    }
+
+    private static void demo(Thread.Builder builder) {
+        // create 50 threads
+        for (int i = 0; i < 50; i++) {
+            builder.start(() -> {
+                LOGGER.info("Task started. {}", Thread.currentThread());
+                ioTask();
+                LOGGER.info("Task ended. {}", Thread.currentThread());
+            });
+        }
+    }
+
+    private static void ioTask() {
+        try {
+            lock.lock();
+            // using sleep to simulate I/O intensive tasks or network calls
+            ThreadUtils.sleep(Duration.ofSeconds(10));
+        } catch (Exception e) {
+            LOGGER.error("error", e);
+        } finally {
+            lock.unlock();
+        }
+    }
+}
+```
+
+As output, we will get something like this:
+
+```bash
+17:10:11.830 [virtual-39] INFO section05.Lec06ReentrantLockWithIO -- Task started. VirtualThread[#39]/runnable@ForkJoinPool-1-worker-11
+17:10:11.838 [virtual-57] INFO section05.Lec06ReentrantLockWithIO -- Task started. VirtualThread[#57]/runnable@ForkJoinPool-1-worker-18
+17:10:11.838 [virtual-80] INFO section05.Lec06ReentrantLockWithIO -- *** Test Message ***
+17:10:11.830 [virtual-35] INFO section05.Lec06ReentrantLockWithIO -- Task started. VirtualThread[#35]/runnable@ForkJoinPool-1-worker-6
+// ... other 47 threads
+```

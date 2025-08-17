@@ -2,23 +2,24 @@ package section05;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import utils.ThreadUtils;
 
-public class Lec02Synchronization {
+public class Lec05ReentrantLock {
 
-    private static final Logger LOGGER = LoggerFactory.getLogger(Lec01RaceCondition.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(Lec05ReentrantLock.class);
     private static final List<Integer> intList = new ArrayList<>();
+    private static final Lock lock = new ReentrantLock(true);
 
     public static void main(String[] args) {
         
-        LOGGER.info("starting demo");	
-        //demo(Thread.ofPlatform());
+        LOGGER.info("starting demo");
         demo(Thread.ofVirtual());
 
         ThreadUtils.sleep(Duration.ofSeconds(1));
@@ -41,7 +42,14 @@ public class Lec02Synchronization {
         // by the end of the program we should have 50 * 200 = 10000 itens in the list
     }
 
-    private static synchronized void inMemoryTask() {
-        intList.add(1);
+    private static void inMemoryTask() {
+        try {
+            lock.lock();
+            intList.add(1);
+        } catch (Exception e) {
+            LOGGER.error("error", e);
+        } finally {
+            lock.unlock();
+        }
     }
 }
