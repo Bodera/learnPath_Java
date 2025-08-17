@@ -2238,3 +2238,107 @@ As output, we will get something like this:
 17:10:11.830 [virtual-35] INFO section05.Lec06ReentrantLockWithIO -- Task started. VirtualThread[#35]/runnable@ForkJoinPool-1-worker-6
 // ... other 47 threads
 ```
+
+## Thread Factory
+
+The `Thread.Builder` we've been using so far is not thread-safe. Consider a scenario where you create a task `T1` using `Thread.Builder`, and this thread needs to spawn smaller threads, such as `T11`, `T12`, etc.
+
+This operation establishes a hierarchical relationship between threads, and using `Thread.Builder` instead of a `ThreadFactory` can lead to thread-safety issues.
+
+Let's consider an example where we create multiple threads, each of which spawns a child thread. This scenario is reminiscent of a real-world web application, where a product view page aggregates data from multiple sources. Behind the scenes, multiple microservices might be involved in fetching reviews, prices, and shipping details. Suppose we need to display 100 product views on a page, each requiring data from multiple sources. In this case, each request would need to be handled by multiple child threads. By using a `ThreadFactory`, we can efficiently manage the creation of these threads and build the product view page. Although we'll be using high-level concurrency constructs later, understanding `ThreadFactory` is essential, as it may be used under the hood to simplify thread management.
+
+```java
+public class Demo {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Demo.class);
+
+    public static void main(String[] args) {
+
+        demo(Thread.ofVirtual().name("bodera-virtual", 1).factory());
+
+        ThreadUtils.sleep(Duration.ofSeconds(3));
+    }
+
+    /*
+     * Creates a few threads.
+     * Each thread creates one child thread.
+     * Very basic demo. In real life, we use a ExecutorService.
+     * Virtual threads are cheap to create.
+     */
+    private static void demo(ThreadFactory factory) {
+        for (int i = 0; i < 3; i++) {
+            Thread thread = factory.newThread(() -> {
+                LOGGER.info("Task started. {}", Thread.currentThread());
+
+                Thread childThread = factory.newThread(() -> {
+                    LOGGER.info("Child task started. {}", Thread.currentThread());
+                    ThreadUtils.sleep(Duration.ofSeconds(2));
+                    LOGGER.info("Child task ended. {}", Thread.currentThread());
+                });
+                childThread.start();
+
+                LOGGER.info("Task ended. {}", Thread.currentThread());
+            });
+            thread.start();
+        }
+    }
+}
+```
+
+As output, we will get something like this:
+
+```bash
+18:03:40.060 [bodera-virtual2] INFO section06.Lec01ThreadFactory -- Task started. VirtualThread[#31,bodera-virtual2]/runnable@ForkJoinPool-1-worker-2
+18:03:40.060 [bodera-virtual3] INFO section06.Lec01ThreadFactory -- Task started. VirtualThread[#32,bodera-virtual3]/runnable@ForkJoinPool-1-worker-3
+18:03:40.060 [bodera-virtual1] INFO section06.Lec01ThreadFactory -- Task started. VirtualThread[#29,bodera-virtual1]/runnable@ForkJoinPool-1-worker-1
+18:03:40.064 [bodera-virtual2] INFO section06.Lec01ThreadFactory -- Task ended. VirtualThread[#31,bodera-virtual2]/runnable@ForkJoinPool-1-worker-2
+18:03:40.064 [bodera-virtual4] INFO section06.Lec01ThreadFactory -- Child task started. VirtualThread[#38,bodera-virtual4]/runnable@ForkJoinPool-1-worker-4
+18:03:40.064 [bodera-virtual3] INFO section06.Lec01ThreadFactory -- Task ended. VirtualThread[#32,bodera-virtual3]/runnable@ForkJoinPool-1-worker-3
+18:03:40.064 [bodera-virtual5] INFO section06.Lec01ThreadFactory -- Child task started. VirtualThread[#39,bodera-virtual5]/runnable@ForkJoinPool-1-worker-6
+18:03:40.064 [bodera-virtual1] INFO section06.Lec01ThreadFactory -- Task ended. VirtualThread[#29,bodera-virtual1]/runnable@ForkJoinPool-1-worker-1
+18:03:40.064 [bodera-virtual6] INFO section06.Lec01ThreadFactory -- Child task started. VirtualThread[#40,bodera-virtual6]/runnable@ForkJoinPool-1-worker-4
+18:03:42.080 [bodera-virtual5] INFO section06.Lec01ThreadFactory -- Child task ended. VirtualThread[#39,bodera-virtual5]/runnable@ForkJoinPool-1-worker-4
+18:03:42.080 [bodera-virtual6] INFO section06.Lec01ThreadFactory -- Child task ended. VirtualThread[#40,bodera-virtual6]/runnable@ForkJoinPool-1-worker-2
+18:03:42.080 [bodera-virtual4] INFO section06.Lec01ThreadFactory -- Child task ended. VirtualThread[#38,bodera-virtual4]/runnable@ForkJoinPool-1-worker-1
+```
+
+## Quiz time
+
+Q - What is the primary motivation behind introducing virtual threads in Java?
+A - To simplify concurrent programming by making threads lightweight.
+
+Q - How does the scheduling of virtual threads differ from platform threads in Java?
+A - Virtual threads use a cooperative scheduling model, while platform threads use a preemptive scheduling model.
+
+Q - What is a key benefit of using virtual threads in Java?
+A - They have lower memory overhead compared to platform threads.
+
+Q - Which of the following statements is true?
+  I - Each virtual thread has its dedicated carrier thread. (False)
+  II - Carrier threads are used to create and manage virtual threads in the pool. (False)
+  III - Carrier threads adapt to the parallelism of virtual thread tasks, dynamically adjusting their number. (False)
+
+Q - Which of the following statements is true?
+  I - To scale, increase the carrier threads count. (False)
+  II - Use Virtual Threads for all the computational tasks. (False)
+  III - fork-join-worker pool is not same as fork-join-common pool. (True)
+
+Q - What will this code print?
+
+```java
+1 | changePriority(Thread.ofPlatform().unstarted(() -> {}));
+2 | changePriority(Thread.ofVirtual().unstarted(() -> {}));
+3 |  
+4 | void changePriority(Thread thread){
+5 |   thread.setPriority(6);
+6 |   System.out.println(thread.getPriority());
+7 | }
+```
+
+A - 
+```java
+1 | 6
+2 | 5
+```
+
+## Summary
