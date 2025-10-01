@@ -2342,3 +2342,12 @@ A -
 ```
 
 ## Summary
+
+- A process is a unit of resources that contains at least one thread, which is a unit of execution.
+- Threads can be OS threads (platform threads) or virtual threads.
+- OS threads are expensive to create and limited in number, while virtual threads are lightweight and can be created in large numbers.
+- Virtual threads are suitable for IO tasks and provide non-blocking benefits, but may not be beneficial for pure computation tasks.
+- Virtual threads are executed by platform threads (career threads) and may not provide benefits if the task is compute-intensive.
+- Developers are responsible for writing thread-safe code, and virtual threads do not solve all concurrency issues.
+- Synchronized blocks of code can pin virtual threads to a career thread, making them unsuitable for IO tasks.
+- `ThreadFactory` and other low-level concurrency methods are available, but a high-level concurrency framework is recommended.
