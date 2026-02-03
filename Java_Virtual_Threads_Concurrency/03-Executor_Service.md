@@ -223,9 +223,198 @@ The shift from queuing tasks (waiting for threads) to instantly creating virtual
 
 Ready to see this in action? Let's start playing with virtual executors in the next section!
 
+_💡 Pro Tip: Don't think of virtual threads as replacing everything—think of them as a powerful new tool in your concurrent programming toolkit. Traditional executors still have their place, but virtual threads shine when you have high-concurrency, I/O-heavy workloads!_
+
 ---
 
-_💡 Pro Tip: Don't think of virtual threads as replacing everything—think of them as a powerful new tool in your concurrent programming toolkit. Traditional executors still have their place, but virtual threads shine when you have high-concurrency, I/O-heavy workloads!_
+## Guide: ExecutorService and AutoCloseable in Java 21
+
+### 1. The Big Change: Why it matters
+
+In Java 21, `ExecutorService` now extends `AutoCloseable`.
+
+* **Before Java 21:** You had to manually call `.shutdown()` in a `finally` block to ensure your application didn't hang.
+* **Java 21+:** You can use **Try-with-Resources**. When the `try` block finishes, Java automatically calls `.close()`, which triggers a shutdown.
+
+### 2. Shutdown vs. ShutdownNow
+
+Understanding how an executor stops is crucial for preventing data loss or "zombie" threads.
+
+| Method | Behavior | New Task Submission |
+| --- | --- | --- |
+| **`shutdown()`** | Graceful. Waits for submitted tasks to finish. | Rejected (Throws `RejectedExecutionException`) |
+| **`shutdownNow()`** | Forceful. Attempts to stop active tasks immediately. | Rejected |
+| **`close()`** | Called by Try-with-Resources. In Java 21, it acts like `shutdown()` and waits. | Rejected |
+
+---
+
+### 3. Implementation Comparison
+
+#### The "Old" Way (Manual Management)
+
+This approach is prone to memory leaks if you forget the shutdown call.
+
+```java
+ExecutorService executor = Executors.newSingleThreadExecutor();
+executor.submit(() -> System.out.println("Task running..."));
+
+executor.shutdown(); // Must remember to do this!
+
+```
+
+#### The "Modern" Way (Try-with-Resources)
+
+```java
+// The executor is automatically closed at the end of the curly brace
+try (var executor = Executors.newSingleThreadExecutor()) {
+    executor.submit(() -> {
+        Thread.sleep(1000);
+        System.out.println("Task 1 Complete");
+    });
+    executor.submit(() -> System.out.println("Task 2 Complete"));
+} 
+// .close() is called automatically here. 
+// The program waits for tasks to finish before moving past this line.
+
+```
+
+---
+
+### 4. When to use Try-with-Resources?
+
+You shouldn't use this *everywhere*. It depends on the **lifecycle** of your application:
+
+* **✅ Use it for: Short-lived tasks.** Scripting, batch processing, or CLI tools where the work has a clear beginning and end.
+* **❌ Avoid it for: Long-lived applications.** Spring Boot microservices or Web Servers. In these cases, the Executor should stay alive as a **Bean** to handle requests throughout the day. If you put it in a `try` block, it will die as soon as the first request finishes!
+
+> **Key Takeaway:** `AutoCloseable` makes code cleaner and prevents the application from hanging, but only use it when you actually *want* the executor to stop after the block of code runs.
+
+---
+
+### Quiz time
+
+Q. In Java 21, which interface was added to the 'ExecutorService' hierarchy to enable its use in try-with-resources blocks?
+
+A. AutoCloseable -> Implementing AutoCloseable allows the JVM to automatically call the .close() method when exiting a try-with-resources block.
+
+Q. When an 'ExecutorService' is used within a try-with-resources block in Java 21, what happens internally when the block finishes?
+
+A. The `.close()` method is called, which internally triggers `.shutdown()`. -> Java 21's implementation ensures that `.close()` initiates a graceful shutdown and waits for tasks to complete.
+
+Q. What is the primary difference between '.shutdown()' and '.shutdownNow()'?
+
+A. `.shutdown()` waits for existing tasks; `.shutdownNow()` attempts to stop them immediately -> Shutdown is 'graceful' because it respects already submitted work, while shutdownNow is 'forceful'.
+
+Q. Why is it generally NOT recommended to use try-with-resources for an 'ExecutorService' in a Spring Boot web application bean?
+
+A. It would close the executor after a single use, making it unavailable for future requests. -> In web apps, we need the executor to stay 'alive' to handle multiple incoming requests over time.
+
+Q. If you call `.shutdown()` and then immediately try to call `.submit(newTask)`, what will happen?
+
+A 'RejectedExecutionException' will be thrown -> This is the standard runtime exception used to signal that the executor is no longer accepting tasks.
+
+Q. Which utility class is commonly used to create different types of 'ExecutorService' implementations, such as a single-threaded executor?
+
+A. Executors -> The 'Executors' class provides static factory methods for creating pre-configured thread pools.
+
+Q. What happens to tasks that are currently waiting in the queue (but haven't started yet) when `.shutdownNow()` is called?
+
+A. They are drained from the queue and returned as a list of Runnables. -> The `.shutdownNow()` method returns the list of tasks that were never started so the caller can handle them.
+
+Q. In the context of the lecture, what is the 'short-lived application' where try-with-resources is most useful?
+
+A. A command-line tool that performs a specific calculation and exits. -> In 'one-and-done' tools, ensuring the executor closes allows the JVM to exit without hanging.
+
+Q. If you don't use try-with-resources or call `.shutdown()`, why might your Java application fail to exit even after 'main' finishes?
+
+A. Active non-daemon threads in the executor's pool keep the JVM alive. -> The JVM only exits when all non-daemon threads (like those in a standard executor) have finished.
+
+Q. What is the result of using 'var' with an 'ExecutorService' in a try-with-resources block, as shown in the lecture?
+
+A. The compiler infers the type as 'ExecutorService', keeping the code clean -> Using 'var' reduces boilerplate code while maintaining the full functionality of the inferred type.
+
+### Demo
+
+```java
+public class Lec01AutoCloseable {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+        Lec01AutoCloseable.class
+    );
+
+    public static void main(String[] args) {
+
+        var executorService = Executors.newSingleThreadExecutor();
+        executorService.submit(Lec01AutoCloseable::task);
+        LOGGER.info("submitted");
+        exe
+    }
+
+    private static void task() {
+        ThreadUtils.sleep(Duration.ofSeconds(1));
+        LOGGER.info("task executed");
+    }
+}
+```
+
+Ouput:
+```
+02:20:30.689 [main] INFO section07.Lec01AutoCloseable -- submitted
+02:20:31.692 [pool-1-thread-1] INFO section07.Lec01AutoCloseable -- task executed
+```
+
+We can nottice a couple of things here:
+
+1. The `main` thread submitted the task
+2. The `pool-1-thread-1` thread executed the task - a single thread executor
+3. The application still runs after the task is completed
+
+if you modify it a bit like so
+
+```java
+public class Lec01AutoCloseable {
+//...
+    public static void main(String[] args) {
+
+        var executorService = Executors.newSingleThreadExecutor();
+        executorService.submit(Lec01AutoCloseable::task);
+        LOGGER.info("submitted");
+        executorService.shutdown();
+    }
+//...
+}
+```
+
+Ouput:
+```
+02:26:18.885 [main] INFO section07.Lec01AutoCloseable -- submitted
+02:26:19.885 [pool-1-thread-1] INFO section07.Lec01AutoCloseable -- task executed
+
+Process finished with exit code 0
+```
+
+and if you modify it a bit like so
+
+```java
+public class Lec01AutoCloseable {
+//...
+    public static void main(String[] args) {
+
+        var executorService = Executors.newSingleThreadExecutor();
+        executorService.submit(Lec01AutoCloseable::task);
+        LOGGER.info("submitted");
+        executorService.shutdownNow();
+    }
+//...
+}
+```
+
+Ouput:
+```
+02:28:27.981 [main] INFO section07.Lec01AutoCloseable -- submitted
+
+Process finished with exit code 0
+```
 
 
 
