@@ -416,5 +416,75 @@ Ouput:
 Process finished with exit code 0
 ```
 
+---
+
+## 🚀 Lecture Notes: Java ExecutorService Types
+
+The `ExecutorService` simplifies asynchronous execution by decoupling task submission from thread management.
+
+### 1. Common Utility Method
+
+To test these executors, we use a shared `execute` method. Note the use of **Try-with-Resources**, which ensures `executor.close()` is called, preventing resource leaks.
+
+```java
+private static void execute(ExecutorService executorService, int taskCount) {
+    try (executorService) { // Automatically shuts down after tasks complete
+        for (int i = 0; i < taskCount; i++) {
+            int j = i;
+            executorService.execute(() -> ioTask(j));
+        }
+    }
+}
+```
+
+---
+
+### 2. Standard Thread Pools (Platform Threads)
+
+| Type | Factory Method | Behavior | Best Use Case |
+| --- | --- | --- | --- |
+| **Single** | `newSingleThreadExecutor()` | One thread, executes tasks **sequentially**. | Mission-critical tasks where order matters and thread safety is a concern. |
+| **Fixed** | `newFixedThreadPool(n)` | A pool with a fixed number of threads. | Predictable load; prevents system exhaustion by limiting thread count. |
+| **Cached** | `newCachedThreadPool()` | Starts with 0 threads; creates new ones as needed. Reuses idle threads. | Short-lived asynchronous tasks with fluctuating volume. |
+| **Scheduled** | `newScheduledThreadPool(n)` | Supports delayed or periodic execution. | Heartbeats, cleaning caches, or polling services. |
+
+> **💡 Pro Tip:** The difference between a `SingleThreadExecutor` and a `FixedThreadPool(1)` is that the Single version cannot be reconfigured or resized later in the code, providing a "guaranteed" sequential behavior.
+
+---
+
+### 3. The Modern Era: Virtual Threads (Project Loom)
+
+Introduced in recent Java versions, these are lightweight threads that don't map 1:1 to OS threads.
+
+* **Method:** `Executors.newVirtualThreadPerTaskExecutor()`
+* **How it works:** It doesn't use a "pool" because virtual threads are "cheap" to create. It simply spawns a new virtual thread for every single task.
+* **Scale:** Can handle millions of tasks (e.g., 10,000+ IO tasks) without throwing `OutOfMemoryError`.
+* **When to use:** Blocking IO operations (API calls, Database queries). **Avoid** for heavy CPU calculations.
+
+---
+
+### 4. Scheduled Executor Details
+
+Used for tasks that need to run repeatedly.
+
+* **`scheduleAtFixedRate`**: Starts the next task based on the **start time** of the previous one (ignores how long the task took).
+* **`scheduleWithFixedDelay`**: Starts the next task only after a specific delay **following the completion** of the previous one.
+
+```java
+// Example: Running every 1 second after a 5-second sleep
+executor.scheduleWithFixedDelay(task, 0, 1, TimeUnit.SECONDS);
+```
+
+---
+
+### 🔑 Key Study Questions
+
+* **Q:** Why use `CachedThreadPool` for 200 tasks instead of `Fixed(5)`?
+* *A: Cached will run all 200 in parallel (if resources allow), whereas Fixed(5) will process them 5 at a time in a queue.
+
+* **Q:** Can I use Virtual Threads for Scheduling?
+* *A: Currently, `newSingleThreadScheduledExecutor` uses platform threads. We will explore workarounds for virtual-thread scheduling in future lectures.*
+
+---
 
 
