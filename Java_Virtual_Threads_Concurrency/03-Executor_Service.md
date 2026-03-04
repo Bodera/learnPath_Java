@@ -609,4 +609,212 @@ If you want to see how these executors handle real "traffic," you can wrap your 
 
 This video provides a side-by-side comparison of how Virtual Threads and Platform Threads behave under high load in a real application using JMeter, which is exactly what you need to visualize the performance difference.
 
+### One Final "Gotcha" for your Notes: **Thread Local Variables**
+
+As you study further, keep an eye out for **ThreadLocals**.
+
+* **Platform Threads:** We often use ThreadLocals because we only have a few threads.
+* **Virtual Threads:** Since you might have 1,000,000 virtual threads, using heavy ThreadLocal data can eat up your memory fast! This is a common "trap" in modern Java interviews.
+
+---
+
+## 🚀 Simulating external services
+
+The goal is to simulate a **Microservices environment** using a single provided `.jar` file.
+
+* **Execution Command:** 
+```bash
+java -jar external-services.jar
+```
+
+* **Custom Port (Optional):** If `7070` is taken, use:
+
+```bash
+java -jar external-services.jar --server.port=8080
+```
+
+* **Accessing the UI:** Once running, navigate to: `http://localhost:7070/swagger-ui/`
+* **Compatibility:** Built with Java 17, but fully compatible with your Java 21 setup.
+
+
+### 🛠️ The Simulation Environment
+
+Even though it is one file, you are instructed to **visualize it as two distinct microservices**. This simulates network latency and I/O overhead—the "bread and butter" use case for Virtual Threads.
+
+### 1. Product Microservice (`/product`)
+
+* **Input:** Product ID (up to 50).
+* **Output:** A random String representing a product name.
+* **Behavior:** Simulates a slow service with a **~1-second delay** to mimic network/database calls.
+
+### 2. Rating Microservice (`/rating`)
+
+* **Input:** Product ID.
+* **Output:** A random integer (1–5).
+* **Behavior:** Similar to the product service, used to simulate an independent data source for the same ID.
+
+### 💡 Key Takeaways for your Course
+
+* **Why are we doing this?** To stop using `Thread.sleep()` and start practicing **blocking I/O calls**. Virtual threads shine when a thread is "waiting" for a response from a service like this.
+* **Data Format:** Currently, these return simple **Strings**, but the course will transition to **JSON** payloads once you start using Spring Boot Web.
+* **Focus:** For now, ignore Sections 02 and 03 in the Swagger UI; focus strictly on **Section 01**.
+
+---
+
+This is a great follow-up. In this lecture, you've transitioned from just running the "server" (the JAR file) to building the **Client**—the actual Java code that will interact with it.
+
+Since the goal of the course is to study **Virtual Threads**, this client is designed to be "blocking" on purpose so you can see how Virtual Threads handle those pauses.
+
+---
+
+## 🛠️ The Client Implementation Summary
+
+```java
+public class Client {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+            Client.class
+    );
+    private static final String PRODUCT_REQUEST_FORMAT = "http://localhost:7070/sec01/product/%d";
+    private static final String RATING_REQUEST_FORMAT = "http://localhost:7070/sec01/rating/%d";
+
+    public static String getProduct(int id) {
+        return callExternalService(PRODUCT_REQUEST_FORMAT.formatted(id));
+    }
+
+    public static Integer getRating(int id) {
+        return Integer.parseInt(callExternalService(RATING_REQUEST_FORMAT.formatted(id)));
+    }
+
+    private static String callExternalService(String url) {
+        LOGGER.info("Calling externa service at {}", url);
+        try (var stream = URI.create(url).toURL().openStream()) {
+            return new String(stream.readAllBytes());
+        } catch (Exception e)  {
+            LOGGER.error("Error calling externa service", e);
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+You’ve built a utility class called `Client` that handles the communication between your "playground" project and the external microservice.
+
+### 1. Request Architecture
+
+Instead of using a complex `HttpClient` immediately, the instructor has you using a simpler, lower-level approach to demonstrate the basics of a network call.
+
+* **URL Templates:** You defined constants using `%d` placeholders. This allows you to dynamically inject the `productId` into the URL using `.formatted(id)`.
+* **Target API:** It specifically targets `sec01` endpoints on `localhost:7070`.
+
+### 2. The Core Logic: `callExternaServic`
+
+This private method is the engine of the class. It handles three critical steps:
+
+* **Connection:** `URI.create(url).toURL().openStream()` initiates the TCP connection and sends the HTTP GET request.
+* **Reading:** `readAllBytes()` pulls the entire response into memory.
+> **Note:** The instructor mentioned this is fine here because the responses (product names and ratings) are very small.
+
+
+* **Resource Management:** You are using a **try-with-resources** block `try (var stream = ...)` which ensures the input stream is closed automatically, preventing memory leaks.
+
+### 3. Public API Methods
+
+You exposed two specific methods to make the client easy to use:
+
+* **`getProduct(int id)`**: Returns a `String` (the product name).
+* **`getRating(int id)`**: Returns an `Integer`. It internally calls the string-based service and parses the result using `Integer.parseInt()`.
+
+---
+
+## 📝 Key Observations for Virtual Threads
+
+* **Blocking I/O:** Every time you call `openStream()` or `readAllBytes()`, the thread executing that code **blocks** (it sits idle waiting for the network).
+* **The "Playground" Setup:** This is the perfect environment to test Virtual Threads because they are designed to "unmount" from the CPU while these blocking network calls are waiting for a response.
+
+---
+
+This lecture is a major milestone: you are moving from simply "running" code to orchestrating **parallel tasks** using Java's modern concurrency model.
+
+Here is the summary of how you are now accessing responses using `Future` and Virtual Threads.
+
+The code:
+
+```java
+public class Lec03AccessResponseUsingFuture {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(Lec03AccessResponseUsingFuture.class);
+
+    static void main(String[] args) throws InterruptedException, ExecutionException {
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+
+            Future<String> product41 = executor.submit(() -> Client.getProduct(41));
+            Future<String> product42 = executor.submit(() -> Client.getProduct(42));
+            Future<String> product43 = executor.submit(() -> Client.getProduct(43));
+
+            LOGGER.info("product-41: {}", product41.get());
+            LOGGER.info("product-42: {}", product42.get());
+            LOGGER.info("product-43: {}", product43.get());
+        }
+    }
+}
+```
+
+Output: 
+
+```bash
+22:29:23.925 [virtual-41] INFO section07.externalservices.Client -- Calling externa service at http://localhost:7070/sec01/product/43
+22:29:23.925 [virtual-37] INFO section07.externalservices.Client -- Calling externa service at http://localhost:7070/sec01/product/41
+22:29:23.925 [virtual-39] INFO section07.externalservices.Client -- Calling externa service at http://localhost:7070/sec01/product/42
+22:29:24.947 [main] INFO section07.Lec03AccessResponseUsingFuture -- product-41: Durable Marble Clock
+22:29:24.947 [main] INFO section07.Lec03AccessResponseUsingFuture -- product-42: Mediocre Aluminum Hat
+22:29:24.947 [main] INFO section07.Lec03AccessResponseUsingFuture -- product-43: Practical Marble Bag
+
+
+Process finished with exit code 0
+```
+
+---
+
+## 🛰️ From Runnable to Callable
+
+Previously, you likely used `executor.submit(() -> { ... })` for tasks that just "did work" without returning anything.
+
+* **The Shift:** By using `Client.getProduct(id)`, your task now returns a value.
+* **The Mechanism:** When you submit a task that returns a value (a `Callable`), the executor returns a **`Future<T>`**.
+* **The Metaphor:** Think of a `Future` as a **claim check** or a placeholder. You don't have the product yet, but you have a ticket you can exchange for it once it's ready.
+
+---
+
+## ⚡ Parallelism vs. Sequential Execution
+
+
+
+This is where the power of Virtual Threads becomes obvious. In a traditional sequential program, three requests with a 1-second delay would take **3 seconds**.
+
+* **Concurrency in Action:** In your logs, you can see all three "Calling external service" messages appear at almost the exact same millisecond (`22:27:54.815`).
+* **The Result:** Even though each call takes 1 second, because they run in parallel on separate virtual threads, you get all three results back in **~1 second total**.
+* **Logs Reveal the Threads:** Notice the names in your logs: `[virtual-37]`, `[virtual-39]`, and `[virtual-41]`. These are the individual virtual threads doing the heavy lifting.
+
+---
+
+## 🛑 The Role of `future.get()`
+
+The method `future.get()` is a **blocking call**.
+
+* **The "Old" Problem:** In the past, blocking a thread was "expensive" because it tied up a limited platform thread.
+* **The Virtual Thread Solution:** When you call `.get()`, the Virtual Thread "unmounts." It doesn't hog the CPU; it just waits efficiently.
+* **Developer Experience:** As the instructor noted, Java 21 encourages this "blocking style" because it’s easier to read than complex asynchronous/reactive code, but it performs just as well under the hood.
+
+---
+
+## 🔍 Troubleshooting Tips
+
+If your code fails, the instructor suggests this checklist:
+
+1. **Server Check:** Is the `.jar` still running?
+2. **Connectivity:** Can you reach `http://localhost:7070/sec01/product/1` in your browser?
+3. **Code Match:** Ensure your `Client` matches the one you built in the previous step.
+
+---
 
