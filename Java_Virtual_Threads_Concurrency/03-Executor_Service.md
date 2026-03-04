@@ -818,3 +818,744 @@ If your code fails, the instructor suggests this checklist:
 
 ---
 
+# Concurrency vs Parallelism
+
+## 1️⃣ Big Picture
+
+* **Concurrency** is the broader concept.
+* **Parallelism** is a specific type of concurrency.
+
+So every parallel program is concurrent — but not every concurrent program is parallel.
+
+---
+
+# 🔹 What Is Concurrency?
+
+Concurrency is about **dealing with multiple tasks over a period of time**.
+
+It does **not** necessarily mean tasks run at the exact same time.
+
+It means the system can manage multiple tasks and make progress on all of them.
+
+---
+
+## 🖥 Example: One CPU, Two Applications
+
+Imagine:
+
+* You have **Chrome**
+* You have **IntelliJ**
+* You have **one CPU core**
+
+The CPU works like this:
+
+```
+Run Chrome for a bit
+Run IntelliJ for a bit
+Run Chrome again
+Run IntelliJ again
+...
+```
+
+It switches very fast between them.
+
+To you, it *looks* like both are running at the same time.
+
+But in reality:
+
+- Only one task runs at any given instant.
+- The CPU just switches quickly between them.
+
+This is **concurrency**.
+
+---
+
+## 👨‍🍳 Chef Example (Very Important)
+
+Imagine one chef preparing two dishes.
+
+He:
+
+* Chops vegetables for Dish A
+* Switches to stirring Dish B
+* Goes back to Dish A
+* Returns to Dish B
+
+It looks like both dishes are being prepared simultaneously.
+
+But:
+
+- The chef can only do one thing at a time.
+- He just switches between tasks.
+
+That is concurrency.
+
+---
+
+# 🔹 Concurrency in a Java Web Application
+
+Let’s imagine:
+
+* You built a Spring Boot web application.
+* A user from the US sends a request.
+* A user from the UK sends another request.
+
+Your server:
+
+* Assigns **Thread 1** to Request 1
+* Assigns **Thread 2** to Request 2
+
+Now both threads are making progress.
+
+Even if you have only one CPU core, the system switches between threads quickly.
+
+This allows your application to **handle multiple requests efficiently**.
+
+Java provides tools for this in:
+
+```
+java.util.concurrent
+```
+
+Concurrency is about:
+
+* Managing multiple tasks
+* Coordinating them
+* Making progress on all of them
+
+---
+
+# 🔹 What Is Parallelism?
+
+Parallelism is about **doing multiple tasks at the exact same time**.
+
+To achieve this, you need:
+
+* Multiple CPU cores
+
+---
+
+## 🧮 Example: Sorting 6 Million Items
+
+Imagine:
+
+* You receive an array with **6 million elements**
+* You need to sort it
+
+If you use:
+
+* One thread
+* One CPU core
+
+It will take time.
+
+Instead, you could:
+
+1. Split the array into 6 smaller arrays (1 million each)
+2. Use 6 threads
+3. Run them on 6 CPU cores
+
+Now:
+
+- All 6 threads execute **simultaneously**
+- Work happens at the same time
+- Total processing time decreases
+
+This is **parallelism**.
+
+---
+
+## 👨‍🍳 Six Chefs Example
+
+Instead of one chef switching between dishes:
+
+Now you have **six chefs**, each preparing one dish at the same time.
+
+That is parallelism.
+
+---
+
+# 🧠 Key Difference (The Core Idea)
+
+Here’s the simplest mental model:
+
+```
+Concurrency  = Dealing with many tasks
+Parallelism  = Doing many tasks at the same time
+```
+
+Or even simpler:
+
+```
+Concurrency = Switching
+Parallelism = Simultaneous execution
+```
+
+---
+
+# 📊 Visual Summary
+
+## Concurrency (Single Core)
+
+```
+Time →
+[Task A][Task B][Task A][Task B][Task A]
+```
+
+Only one runs at a time — but they all make progress.
+
+---
+
+## Parallelism (Multiple Cores)
+
+```
+Core 1: [Task A][Task A][Task A]
+Core 2: [Task B][Task B][Task B]
+```
+
+Tasks truly run at the same time.
+
+---
+
+# ⚖️ Comparison Table
+
+| Concurrency                         | Parallelism                  |
+| ----------------------------------- | ---------------------------- |
+| Broader concept                     | Specific type of concurrency |
+| May use single CPU                  | Requires multiple CPUs/cores |
+| Tasks make progress over time       | Tasks run simultaneously     |
+| Focused on structure & coordination | Focused on performance       |
+
+---
+
+# 💡 Final Mental Model for Your Future Self
+
+When you think:
+
+* “How can I handle many users at once?” → **Concurrency**
+* “How can I make this computation faster?” → **Parallelism**
+
+---
+
+# 🔥 One Last Important Insight
+
+You can have:
+
+* Concurrency without parallelism (1 core switching)
+* Parallelism always implies concurrency
+
+---
+
+# Working with `Future` in Java
+
+When using an **Executor (including a virtual thread executor)**, every time you submit a task, you get back a **`Future`**.
+
+Think of a `Future` as:
+
+> 📦 A placeholder for a result that will be available later.
+
+---
+
+## 1️⃣ Submitting a Task
+
+When you submit a `Callable` to an executor:
+
+```java
+Future<String> future = executor.submit(() -> getUserInfo());
+```
+
+If `getUserInfo()` returns a `String`, then:
+
+```java
+Future<String>
+```
+
+Because `Future<T>` holds whatever the `Callable<T>` returns.
+
+---
+
+# 🔹 What Does `Future` Actually Do?
+
+A `Future` lets you:
+
+* Wait for the result
+* Get the result
+* Cancel the task
+* Check if it’s done
+
+---
+
+# 2️⃣ `future.get()` — Wait for Result
+
+```java
+String result = future.get();
+```
+
+What happens here?
+
+* The current thread **blocks**
+* It waits until the task finishes
+* Then it returns the result
+
+So this:
+
+```java
+future.get();
+```
+
+means:
+
+> “I’m willing to wait as long as it takes.”
+
+⚠️ If the task takes 20 seconds… you wait 20 seconds.
+
+---
+
+# 3️⃣ `future.get(timeout)` — Wait, But Not Forever
+
+Sometimes you don’t want to wait forever.
+
+You can say:
+
+```java
+future.get(2, TimeUnit.SECONDS);
+```
+
+This means:
+
+> “Wait at most 2 seconds.”
+
+If the task doesn’t finish within 2 seconds:
+
+* A `TimeoutException` is thrown
+
+So you typically wrap it in a `try-catch`:
+
+```java
+try {
+    String result = future.get(2, TimeUnit.SECONDS);
+} catch (TimeoutException e) {
+    // fallback logic
+}
+```
+
+This allows you to:
+
+* Provide a default value
+* Return partial data
+* Log and move on
+* Retry
+
+Very useful in real-world systems.
+
+---
+
+# 4️⃣ `future.cancel(true)` — Stop the Task
+
+You can also cancel a running task:
+
+```java
+future.cancel(true);
+```
+
+What does this do?
+
+* Sends an **interrupt signal** to the thread
+* If the task responds to interruption, it stops
+
+Important:
+
+> Cancellation works only if the task cooperates with interruption.
+
+If your code ignores `InterruptedException`, cancellation may not work properly.
+
+---
+
+# 🧠 Mental Model
+
+Think of `Future` like ordering food at a restaurant:
+
+* You place the order → `submit()`
+* You get a token → `Future`
+* You can:
+
+  * Wait until it's ready → `get()`
+  * Wait only 2 minutes → `get(timeout)`
+  * Cancel the order → `cancel()`
+
+---
+
+# ⚠️ Important Limitation of `Future`
+
+`Future` is:
+
+* Blocking
+* Imperative
+* Not composable
+* Not elegant for chaining tasks
+
+That’s why Java introduced:
+
+👉 `CompletableFuture`
+
+---
+
+# 🔹 Why `CompletableFuture` Is Better
+
+With `Future`, you write:
+
+```java
+String result = future.get();
+process(result);
+```
+
+With `CompletableFuture`, you can write:
+
+```java
+future.thenApply(this::process)
+      .thenAccept(System.out::println);
+```
+
+More:
+
+* Declarative
+* Functional style
+* Non-blocking
+* Easier composition
+* Better error handling
+
+We’ll go deeper into timeouts and chaining later.
+
+---
+
+# 📊 Quick Comparison
+
+| Feature          | `Future` | `CompletableFuture` |
+| ---------------- | -------- | ------------------- |
+| Blocking         | Yes      | Optional            |
+| Timeout support  | Yes      | Yes                 |
+| Cancellation     | Yes      | Yes                 |
+| Chaining         | No       | Yes                 |
+| Functional style | No       | Yes                 |
+
+---
+
+# 🔥 Core Takeaway for Future You
+
+`Future` is:
+
+> A handle to a background computation.
+
+It lets you:
+
+* Wait
+* Timeout
+* Cancel
+
+But it’s somewhat basic.
+
+For modern async programming in Java:
+
+👉 Use `CompletableFuture` whenever possible.
+
+---
+
+# 🧩 Aggregator Pattern (API Composition Pattern)
+
+In real-world systems, we often have multiple backend services:
+
+* 🛍 Product Service
+* ⭐ Rating Service
+* 💰 Pricing Service
+* 📦 Inventory Service
+* etc.
+
+A frontend (browser/mobile app) should NOT call all of them individually.
+
+Instead, we introduce an **Aggregator Service**.
+
+This pattern is known as:
+
+* **Gateway Aggregator Pattern**
+* **API Composition Pattern**
+
+---
+
+# 🖼 Big Picture Architecture
+
+```
+Client (Browser)
+        |
+        v
+  Aggregator Service
+      /        \
+     v          v
+Product API   Rating API
+```
+
+The aggregator:
+
+1. Receives a product ID
+2. Calls multiple backend services
+3. Combines their responses
+4. Returns a single unified response
+
+---
+
+# 🧠 The Goal
+
+If someone requests:
+
+```
+GET /product/42
+```
+
+The aggregator should internally call:
+
+```
+GET product-service/42
+GET rating-service/42
+```
+
+Then return:
+
+```json
+{
+  "id": 42,
+  "description": "Heavy Duty Wool Bottle",
+  "rating": 4
+}
+```
+
+---
+
+# 🏗 Step 1 — Product DTO
+
+We create a simple immutable record:
+
+```java
+public record ProductDto(
+    int id,
+    String description,
+    int rating
+) {}
+```
+
+This represents the **combined response**.
+
+---
+
+# 🏗 Step 2 — Aggregator Service
+
+This class:
+
+* Accepts an `ExecutorService`
+* Calls multiple services in parallel
+* Combines results
+
+```java
+public class AggregatorService {
+
+    private final ExecutorService executor;
+
+    public AggregatorService(ExecutorService executor) {
+        this.executor = executor;
+    }
+
+    public ProductDto getProduct(int id)
+            throws ExecutionException, InterruptedException {
+
+        var product = executor.submit(() -> Client.getProduct(id));
+        var rating  = executor.submit(() -> Client.getRating(id));
+
+        return new ProductDto(
+                id,
+                product.get(),
+                rating.get()
+        );
+    }
+}
+```
+
+---
+
+# 🔥 What Is Important Here?
+
+## ✅ These two lines run in parallel:
+
+```java
+var product = executor.submit(() -> Client.getProduct(id));
+var rating  = executor.submit(() -> Client.getRating(id));
+```
+
+Because you're using:
+
+```java
+Executors.newVirtualThreadPerTaskExecutor()
+```
+
+Each task runs in its own **virtual thread**.
+
+So:
+
+* Product service call runs independently
+* Rating service call runs independently
+* Both execute at the same time
+
+---
+
+# ⏱ Visual Timeline
+
+Instead of:
+
+```
+Call product (1s)
+THEN call rating (1s)
+Total = 2s
+```
+
+You get:
+
+```
+Call product  ────── 1s
+Call rating   ────── 1s
+Total ≈ 1s
+```
+
+Parallel execution.
+
+---
+
+# 🧪 Demo Code
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+var aggregator = new AggregatorService(executor);
+
+LOGGER.info("product-42: {}", aggregator.getProduct(42));
+```
+
+---
+
+# 📊 Output Analysis
+
+```
+[virtual-37] Calling product service
+[virtual-39] Calling rating service
+```
+
+Notice:
+
+* Two different virtual threads
+* Both start at the same time
+
+Then:
+
+```
+[main] product-42: ProductDto[id=42, description=..., rating=4]
+```
+
+The main thread waits for both `.get()` calls to complete.
+
+---
+
+# 🧠 Important Concept Here
+
+You are combining:
+
+### Concurrency
+
+You submit multiple tasks and manage them.
+
+### Parallelism
+
+They actually run simultaneously (virtual threads).
+
+### Aggregation
+
+You merge multiple backend responses into one.
+
+---
+
+# ⚠️ One Subtle But Important Detail
+
+Even though calls run in parallel, this line:
+
+```java
+product.get()
+rating.get()
+```
+
+Is still **blocking**.
+
+The main thread waits until both complete.
+
+But because they started in parallel, you still gain performance.
+
+---
+
+# 💡 Why Virtual Threads Are Powerful Here
+
+With traditional platform threads:
+
+* Thousands of concurrent service calls = heavy
+
+With virtual threads:
+
+* Lightweight
+* Cheap
+* Perfect for I/O calls
+* Ideal for microservice aggregation
+
+This is a **very modern Java architecture style (Project Loom era).**
+
+---
+
+# 🧠 Mental Model for Future You
+
+Think of the aggregator as:
+
+> A waiter collecting dishes from multiple kitchens before serving the customer.
+
+Each kitchen works independently.
+
+The waiter waits until all dishes are ready.
+
+Then serves one combined plate.
+
+---
+
+# 🔎 Where This Pattern Is Used
+
+* API Gateways
+* Backend-for-Frontend (BFF)
+* Microservices architecture
+* GraphQL resolvers
+* E-commerce systems
+
+---
+
+# 🧩 If You Want to Improve This Later
+
+Future improvements:
+
+* Handle timeouts individually
+* Add fallback values
+* Use `CompletableFuture` instead
+* Add error isolation
+* Use structured concurrency (Java 21+)
+
+---
+
+# 🔥 Final Takeaway
+
+This lecture demonstrates:
+
+* Real-world use of concurrency
+* Practical parallel service calls
+* Aggregator pattern
+* Virtual thread usage
+
+This is not just “thread theory” anymore — this is production-style backend design.
+
+---
