@@ -1559,3 +1559,395 @@ This lecture demonstrates:
 This is not just “thread theory” anymore — this is production-style backend design.
 
 ---
+
+This is exactly how smart studying looks:
+You’re not just copying code — you’re extracting the **pattern + mental model**.
+
+Let’s restructure this into something your future self will understand instantly.
+
+---
+
+# 🚀 New Requirement: Fetch 50 Products at Once
+
+Previously:
+
+* Client requested **1 product**
+* Aggregator called:
+
+  * Product service
+  * Rating service
+* Returned combined result
+
+Now the requirement changed:
+
+> Client sends **one request** asking for product IDs 1–50.
+
+---
+
+# 🧠 The Problem
+
+Our backend services **do NOT support batch APIs**.
+
+We CANNOT do this:
+
+```http
+GET /products?ids=1,2,3,...50 ❌
+```
+
+Instead, we must call:
+
+```http
+GET /product/1
+GET /product/2
+...
+GET /product/50
+```
+
+And the same for ratings.
+
+That means:
+
+* 50 product calls
+* 50 rating calls
+* 100 total service calls
+
+---
+
+# ❌ If We Do This Sequentially
+
+```text
+Get product 1
+Get product 2
+...
+Get product 50
+```
+
+If each takes 1 second:
+
+```text
+50 seconds total 😬
+```
+
+Not acceptable.
+
+---
+
+# ✅ The Strategy: Parallelize Everything
+
+We use:
+
+```java
+Executors.newVirtualThreadPerTaskExecutor()
+```
+
+We submit **50 tasks in parallel**.
+
+---
+
+# 🖼 Big Architecture Picture
+
+For 1 request from client:
+
+```text
+Client
+   |
+   v
+Aggregator
+   |
+   |---- getProduct(1)
+   |---- getProduct(2)
+   |---- getProduct(3)
+   |---- ...
+   |---- getProduct(50)
+```
+
+But each `getProduct(id)` itself does:
+
+```text
+Product Service
+Rating Service
+```
+
+So what really happens is:
+
+```text
+50 aggregator tasks
+   ×
+2 backend calls each
+=
+100 virtual threads running
+```
+
+🔥 And that’s totally fine with virtual threads.
+
+---
+
+# 🏗 Step 1 — Submit 50 Tasks
+
+```java
+var futures = IntStream.rangeClosed(1, 50)
+        .mapToObj(id -> executor.submit(() -> aggregator.getProduct(id)))
+        .toList();
+```
+
+### What This Does
+
+1. Generates numbers 1–50
+2. For each ID:
+
+   * Submits a task
+   * That task calls `aggregator.getProduct(id)`
+3. Collects everything into:
+
+```java
+List<Future<ProductDto>>
+```
+
+So now we have:
+
+```text
+50 Future objects
+```
+
+Each one represents:
+
+> “The product will be ready soon.”
+
+---
+
+# 🖼 Visual Timeline
+
+Instead of this (sequential):
+
+```text
+[1][2][3][4]...[50]
+```
+
+We get this:
+
+```text
+[1][2][3][4]...[50]
+ |  |  |  |
+All running simultaneously
+```
+
+And inside each:
+
+```text
+Product Call   Rating Call
+      \         /
+       Combined Result
+```
+
+---
+
+# 🏗 Step 2 — Collect Results
+
+Now we convert:
+
+```java
+List<Future<ProductDto>>
+```
+
+into:
+
+```java
+List<ProductDto>
+```
+
+You wrote:
+
+```java
+List<ProductDto> products = futures.stream()
+        .map(Lec04AggregatorDemo::toProductDto)
+        .toList();
+```
+
+And the helper:
+
+```java
+private static ProductDto toProductDto(Future<ProductDto> future) {
+    try {
+        return future.get();
+    } catch (InterruptedException | ExecutionException e) {
+        throw new RuntimeException(e);
+    }
+}
+```
+
+---
+
+# 🧠 Why This Helper Method Is Smart
+
+Instead of messy try/catch inside lambda:
+
+❌ Ugly:
+
+```java
+.map(f -> {
+   try {
+       return f.get();
+   } catch(...) { ... }
+})
+```
+
+✅ Clean:
+
+```java
+.map(Lec04AggregatorDemo::toProductDto)
+```
+
+This keeps your stream pipeline elegant.
+
+That’s good engineering taste.
+
+---
+
+# 🧵 What’s Actually Happening with Threads?
+
+Look at your logs:
+
+```text
+[virtual-59]
+[virtual-88]
+[virtual-113]
+[virtual-164]
+...
+```
+
+You see dozens of virtual threads created instantly.
+
+This matches what we discussed earlier:
+
+### Main thread:
+
+* Submits 50 tasks
+
+### Each aggregator task:
+
+* Creates 2 more virtual threads (product + rating)
+
+So:
+
+```text
+Main Thread
+   └── 50 virtual threads
+           └── each creates 2 virtual threads
+```
+
+Total ≈ 100 service calls in parallel.
+
+---
+
+# ⏱ Timing Observation
+
+From your logs:
+
+```text
+23:25:15 → requests start
+23:25:16 → all 50 results returned
+```
+
+That means:
+
+👉 50 products fetched in ~1 second
+👉 Instead of 50 seconds
+
+This is the power of:
+
+* Parallelism
+* Virtual threads
+* Aggregator pattern
+
+---
+
+# 🔥 Core Mental Model
+
+Think of it like this:
+
+Instead of:
+
+> One delivery guy picking up 50 packages one by one
+
+You now have:
+
+> 50 delivery guys picking up 50 packages at the same time.
+
+And each delivery guy:
+
+> Visits two shops (product + rating) before delivering.
+
+---
+
+# 🧠 Important Concept You Just Demonstrated
+
+This example combines:
+
+* API Composition
+* Concurrency
+* Parallelism
+* Virtual Threads
+* Nested Task Submission
+* Stream processing
+
+This is real production-level backend design.
+
+---
+
+# ⚠️ One Subtle Detail
+
+Even though tasks are parallel:
+
+```java
+future.get()
+```
+
+is still blocking.
+
+But since all 50 tasks are already running:
+
+* `get()` just waits for completion
+* It doesn’t slow down total time significantly
+
+---
+
+# 📦 Final Abstraction Summary
+
+## Problem
+
+Need 50 products, no batch API.
+
+## Solution
+
+Fan out requests in parallel.
+
+## Mechanism
+
+* Virtual thread per task
+* Submit 50 tasks
+* Each task calls 2 services
+* Collect results
+
+## Result
+
+~1 second instead of ~50 seconds.
+
+---
+
+# 🏁 What You Just Built
+
+You implemented a:
+
+> Concurrent fan-out / fan-in aggregator
+
+Fan-out:
+
+* Send many requests
+
+Fan-in:
+
+* Collect results into one list
+
+This is a fundamental distributed systems pattern.
+
+---
