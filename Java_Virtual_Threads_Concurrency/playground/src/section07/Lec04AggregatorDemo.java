@@ -17,7 +17,7 @@ public class Lec04AggregatorDemo {
 
     static void main(String[] args) throws InterruptedException, ExecutionException {
         //on real world these are more likely to be beans or singletons
-        var executor = Executors.newVirtualThreadPerTaskExecutor(Thread.ofVirtual().name("aggregator-demo-", 1).factory());
+        var executor = Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("aggregator-demo-", 1).factory());
         var aggregator = new AggregatorService(executor);
 
         LOGGER.info("product-42: {}", aggregator.getProduct(42));
