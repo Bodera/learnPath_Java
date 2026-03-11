@@ -4014,3 +4014,719 @@ var executor = Executors.newVirtualThreadPerTaskExecutor(
 ---
 
 **Remember:** Good thread naming costs almost nothing and helps tremendously with debugging and monitoring. Always name your threads! 📝✨
+
+---
+
+# ⚠️ Virtual Threads Limitations: Beyond newVirtualThreadPerTaskExecutor()
+
+## TL;DR
+
+Virtual threads are **great for I/O-heavy, one-off tasks**, but Java doesn't provide built-in support for:
+- Scheduled execution (periodic tasks)
+- Resource pooling and management
+- Complex executor patterns (cache, scheduled, fork-join)
+
+This lesson explores the **gap between what we have and what we need**.
+
+```
+✅ What Works Great: One-off I/O tasks
+❌ What's Missing: Scheduled/periodic execution
+❌ What's Missing: Complex executor patterns
+❌ What's Missing: Standard APIs for these scenarios
+
+Solution: We'll learn workarounds and custom implementations in upcoming lectures
+```
+
+---
+
+## The Current State: Virtual Thread Support
+
+### What We Have ✅
+
+```java
+// ✅ STANDARD API - Works great!
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+// Use case: "Execute this task, and I don't care when"
+executor.submit(() -> doWork());
+```
+
+**Characteristics:**
+- One task per virtual thread
+- Fire-and-forget
+- Perfect for I/O-bound work
+- Simple and effective
+
+### What We Don't Have ❌
+
+```java
+// ❌ NO STANDARD API
+// "Execute this task every 5 seconds"
+ScheduledExecutorService scheduledExecutor = 
+    Executors.newScheduledVirtualThreadExecutor();  // ← Doesn't exist!
+
+// "Use a pool of virtual threads to run many tasks"
+ExecutorService cachedExecutor = 
+    Executors.newCachedVirtualThreadExecutor();  // ← Doesn't exist!
+```
+
+**Missing features:**
+- Scheduled/periodic execution
+- Fixed thread pool for virtual threads
+- Cached thread pool for virtual threads
+- Fork-join pool for virtual threads
+- Timed tasks
+
+---
+
+## The Problem Scenario
+
+### Real-World Use Case: Periodic Health Checks
+
+Imagine you're building a microservices application where you need to:
+
+```
+Every 10 seconds:
+├─ Check database connection health
+├─ Check external API availability
+├─ Verify cache status
+└─ Report metrics
+```
+
+### Solution With Platform Threads ✅ (But Limited)
+
+```java
+public class HealthCheckService {
+    
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(1);
+    
+    public void startHealthChecks() {
+        // Schedule periodic task
+        scheduler.scheduleAtFixedRate(
+            this::performHealthCheck,
+            0,           // initial delay
+            10,          // period
+            TimeUnit.SECONDS
+        );
+    }
+    
+    private void performHealthCheck() {
+        LOGGER.info("Performing health check at {}", 
+            LocalDateTime.now());
+        
+        // Check database
+        checkDatabase();
+        
+        // Check APIs
+        checkExternalAPIs();
+        
+        // Check cache
+        checkCache();
+        
+        LOGGER.info("Health check completed");
+    }
+}
+```
+
+### The Problem: Can't Use Virtual Threads Here ❌
+
+```java
+public class HealthCheckServiceWithVT {
+    
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(1);  // ← Platform threads!
+    
+    public void startHealthChecks() {
+        // We WANT to use virtual threads, but there's no API for it!
+        // No: Executors.newScheduledVirtualThreadExecutor()
+        
+        scheduler.scheduleAtFixedRate(
+            this::performHealthCheck,
+            0, 10, TimeUnit.SECONDS
+        );
+        // ❌ Still using platform threads (expensive, limited)
+    }
+}
+```
+
+---
+
+## Understanding The Gap
+
+### Platform Thread Executor Ecosystem
+
+```
+Executors class provides:
+├─ newSingleThreadExecutor()
+│  └─ 1 thread, sequential execution
+├─ newFixedThreadPool(int nThreads)
+│  └─ Fixed number of threads, task queue
+├─ newCachedThreadPool()
+│  └─ Dynamic, creates threads on demand, reuses idle
+├─ newScheduledThreadPool(int corePoolSize)
+│  └─ Periodic and delayed execution
+├─ newSingleThreadScheduledExecutor()
+│  └─ 1 thread, periodic execution
+└─ newForkJoinPool()
+   └─ Divide-and-conquer, CPU-bound tasks
+```
+
+### Virtual Thread Executor Ecosystem (Limited)
+
+```
+Executors class provides:
+└─ newVirtualThreadPerTaskExecutor()
+   └─ One task per virtual thread (only!)
+
+Missing:
+├─ ❌ newScheduledVirtualThreadExecutor()
+├─ ❌ newFixedVirtualThreadPool()
+├─ ❌ newCachedVirtualThreadPool()
+├─ ❌ newSingleVirtualThreadExecutor()
+└─ ❌ Any variant with scheduling
+```
+
+### Comparison Table
+
+| Feature | Platform Threads | Virtual Threads |
+|---------|-----------------|-----------------|
+| **One-off execution** | ✅ newFixedThreadPool() | ✅ newVirtualThreadPerTaskExecutor() |
+| **Scheduled execution** | ✅ newScheduledThreadPool() | ❌ NOT AVAILABLE |
+| **Periodic tasks** | ✅ scheduleAtFixedRate() | ❌ NOT AVAILABLE |
+| **Thread pooling** | ✅ Multiple variants | ❌ Only per-task |
+| **Resource control** | ✅ Pool size management | ❌ Unlimited VT creation |
+| **Java version** | Since Java 5 | Java 21+ |
+
+---
+
+## Why This Gap Exists
+
+### Design Decision: Virtual Threads Philosophy
+
+The Java team decided:
+
+> "Virtual threads should be created per task and discarded. Don't pool them."
+
+This makes sense for **simple I/O tasks**, but breaks down for **scheduled work**.
+
+### The Dilemma
+
+```
+Option A: Force VT pooling (defeats purpose)
+├─ Violates the "don't pool VT" principle
+├─ Loses memory efficiency benefits
+└─ Not the intended usage
+
+Option B: Require periodic task to create new VT each time
+├─ Yes, this is wasteful compared to reusing a thread
+├─ BUT: VTs are so cheap that it might not matter!
+└─ Trade-off: Simplicity vs optimal resource usage
+
+Option C: Provide new APIs (what Java chose)
+├─ Let framework/library authors handle it
+├─ Allows flexibility
+├─ But leaves standard users without built-in solutions
+└─ State of Java 21 (for now)
+```
+
+---
+
+## Real-World Scenarios Lacking VT Support
+
+### Scenario 1: Periodic Health Checks
+
+```java
+// Want to do this:
+var scheduler = Executors.newScheduledVirtualThreadExecutor();
+scheduler.scheduleAtFixedRate(
+    this::healthCheck,
+    0, 10, TimeUnit.SECONDS
+);
+
+// What we actually have to do:
+var scheduler = Executors.newScheduledThreadPool(1);  // Platform threads
+```
+
+**Trade-offs:**
+- ❌ Uses expensive platform thread (1-2 MB stack)
+- ✅ Works reliably
+- ❌ Not scalable if multiple periodic tasks
+- ✅ Standard, familiar API
+
+### Scenario 2: Periodic Cache Refresh
+
+```java
+public class CacheRefreshService {
+    
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(3);  // 3 refresh tasks
+    
+    public void initializeRefreshTasks() {
+        // Refresh user cache every 5 minutes
+        scheduler.scheduleAtFixedRate(
+            this::refreshUserCache,
+            0, 5, TimeUnit.MINUTES
+        );
+        
+        // Refresh product cache every 10 minutes
+        scheduler.scheduleAtFixedRate(
+            this::refreshProductCache,
+            0, 10, TimeUnit.MINUTES
+        );
+        
+        // Refresh recommendation cache every 15 minutes
+        scheduler.scheduleAtFixedRate(
+            this::refreshRecommendationCache,
+            0, 15, TimeUnit.MINUTES
+        );
+    }
+    
+    private void refreshUserCache() { /* ... */ }
+    private void refreshProductCache() { /* ... */ }
+    private void refreshRecommendationCache() { /* ... */ }
+}
+```
+
+**The Problem:**
+```
+3 platform threads reserved just for periodic tasks
+Each consuming 1-2 MB of memory continuously
+Even if idle between executions!
+```
+
+**Ideal Solution (Not Available):**
+```java
+// This doesn't exist (yet):
+var scheduler = Executors.newScheduledVirtualThreadExecutor();
+// Would allow lightweight scheduled execution
+```
+
+### Scenario 3: Request Timeout Handling
+
+```java
+public class TimeoutHandler {
+    
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(5);  // Platform threads
+    
+    public <T> T executeWithTimeout(
+        Callable<T> task, 
+        long timeoutMillis) {
+        
+        // Schedule a cancellation if task takes too long
+        var future = scheduler.submit(task);
+        scheduler.schedule(
+            future::cancel,
+            timeoutMillis,
+            TimeUnit.MILLISECONDS
+        );
+        
+        return future.get();
+    }
+}
+```
+
+**The Problem:**
+```
+Platform threads used for timeout management
+Expensive resource for a simple "cancel after N ms" operation
+```
+
+---
+
+## The Workaround Approaches
+
+### Approach 1: Use Platform Threads (For Now)
+
+```java
+public class CurrentApproach {
+    
+    // For periodic tasks, we have no choice
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(1);
+    
+    // For one-off I/O, use virtual threads
+    private final ExecutorService ioExecutor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    public void handleRequest(Request req) {
+        // I/O operations: virtual threads
+        ioExecutor.submit(() -> {
+            var userService = callUserService(req.userId);
+            var orderService = callOrderService(req.orderId);
+            return combineResults(userService, orderService);
+        });
+        
+        // Periodic tasks: platform threads (for now)
+        scheduler.scheduleAtFixedRate(
+            this::periodicHealthCheck,
+            0, 10, TimeUnit.SECONDS
+        );
+    }
+}
+```
+
+**Status:** ✅ Works, ❌ Not optimal
+
+### Approach 2: Custom Implementation (Preview of Future Lectures)
+
+```java
+// Pseudo-code: Custom scheduled virtual thread executor
+public class CustomScheduledVirtualThreadExecutor {
+    
+    private final ExecutorService virtualExecutor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    private final ScheduledExecutorService platformScheduler = 
+        Executors.newScheduledThreadPool(1);  // Just for scheduling!
+    
+    public ScheduledFuture<?> scheduleAtFixedRate(
+        Runnable command,
+        long initialDelay,
+        long period,
+        TimeUnit unit) {
+        
+        // Platform thread only handles scheduling (lightweight)
+        // Actual work runs on virtual threads
+        return platformScheduler.scheduleAtFixedRate(
+            () -> virtualExecutor.submit(command),  // ← VT per execution!
+            initialDelay,
+            period,
+            unit
+        );
+    }
+}
+```
+
+**Status:** 🔄 Workaround, works but not ideal
+
+### Approach 3: Wait for Standard APIs (Future)
+
+```java
+// Hypothetical future Java version:
+var scheduler = Executors.newScheduledVirtualThreadExecutor();
+scheduler.scheduleAtFixedRate(...);
+
+// Status: 🎯 Ideal, but not yet available (Java 21)
+```
+
+---
+
+## Decision Tree: Which Executor to Use?
+
+```
+"I need to execute some work..."
+
+├─ "...one time, and it does I/O"
+│  └─ ✅ newVirtualThreadPerTaskExecutor()
+│
+├─ "...many times, and they do I/O"
+│  ├─ "...concurrently"
+│  │  └─ ✅ newVirtualThreadPerTaskExecutor()
+│  └─ "...sequentially"
+│     └─ ? (No good option - see Lecture X)
+│
+├─ "...periodically, and it does I/O"
+│  └─ ⚠️ newScheduledThreadPool(1) for now
+│     (Workaround discussed in later lectures)
+│
+├─ "...on a schedule with delays"
+│  └─ ⚠️ newScheduledThreadPool(n) for now
+│     (Workaround discussed in later lectures)
+│
+├─ "...but I want to limit concurrent count"
+│  └─ ? (Limited VT support - see Lecture X)
+│
+└─ "...for CPU-intensive work"
+   └─ ✅ newForkJoinPool() (not related to VT)
+```
+
+---
+
+## The Gap in Numbers: Java 21 Status
+
+### Executor Types Available
+
+| Executor Type | Platform Threads | Virtual Threads | Recommendation |
+|---|---|---|---|
+| One-off async | ✅ ThreadPool | ✅ PerTask | Use VT |
+| Many concurrent | ✅ FixedPool | ⚠️ PerTask only | Use VT |
+| Reuse idle | ✅ CachedPool | ❌ Not available | Use Cached |
+| Scheduled | ✅ ScheduledPool | ❌ Not available | Use Scheduled (PT) |
+| Periodic | ✅ ScheduledPool | ❌ Not available | Use Scheduled (PT) |
+| Delayed execution | ✅ ScheduledPool | ❌ Not available | Use Scheduled (PT) |
+| CPU work | ✅ ForkJoinPool | ❌ Not VT based | Use ForkJoin |
+
+**Takeaway:** ~50% of executor patterns lack native VT support
+
+---
+
+## Visual Overview: Executor Universe (Java 21)
+
+```
+JAVA EXECUTORS LANDSCAPE (Java 21)
+
+Platform Threads (Mature)
+├─ newSingleThreadExecutor()
+├─ newFixedThreadPool()
+├─ newCachedThreadPool()
+├─ newScheduledThreadPool()
+├─ newSingleThreadScheduledExecutor()
+├─ newWorkStealingPool()
+└─ newForkJoinPool()
+   ↑ 20+ years of API
+
+Virtual Threads (New)
+└─ newVirtualThreadPerTaskExecutor()
+   ↑ Only 1 API!
+
+Missing Bridges:
+├─ ❌ newScheduledVirtualThreadExecutor()
+├─ ❌ newFixedVirtualThreadPool()
+├─ ❌ newCachedVirtualThreadPool()
+└─ ❌ Other variants
+   ↑ To be covered in upcoming lectures
+```
+
+---
+
+## Why This Lesson Matters
+
+### Reason 1: Awareness
+
+Not every code scenario can use virtual threads directly. Understanding the limitations helps you:
+- Know when VT is the right choice
+- Know when you're forced to use platform threads
+- Understand trade-offs in your architecture
+
+### Reason 2: Future-Proofing
+
+```
+Java 21: Limited VT APIs
+Java 22: More APIs (maybe)
+Java 23: More APIs (maybe)
+...
+
+By understanding the gap now, you can:
+✅ Write code that's easy to migrate later
+✅ Avoid painting yourself into a corner
+✅ Make informed architectural decisions
+```
+
+### Reason 3: Understanding The Workarounds
+
+The next lectures explore **creative solutions** to problems like:
+- How do you schedule periodic tasks with VT?
+- How do you limit concurrent VT execution?
+- How do you manage VT lifecycle in long-running apps?
+
+These are valuable patterns even if Java adds new APIs later.
+
+---
+
+## What's Coming in Next Lectures
+
+### Lecture Topics (Spoiler Alert)
+
+```
+├─ Scheduled Execution with Virtual Threads
+│  └─ Creating your own scheduler
+│
+├─ Managing VT Concurrency Limits
+│  └─ Semaphore patterns
+│
+├─ VT + Structured Concurrency
+│  └─ Better resource management
+│
+└─ Real-world Workarounds
+   └─ Production-ready patterns
+```
+
+### What You'll Learn
+
+By the end of the next few lectures, you'll understand:
+1. **Why** the gap exists (design decisions)
+2. **What** to do in the meantime (workarounds)
+3. **How** to implement workarounds correctly
+4. **When** to use each pattern
+
+---
+
+## Current Best Practices (Until Gap is Closed)
+
+### For One-Off I/O Tasks ✅
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+executor.submit(() -> doIoWork());
+```
+
+**Status:** Perfect, use this!
+
+### For Scheduled Tasks ⚠️
+
+```java
+// Temporary solution
+var scheduler = Executors.newScheduledThreadPool(1);
+scheduler.scheduleAtFixedRate(
+    this::periodicTask,
+    0, 10, TimeUnit.SECONDS
+);
+```
+
+**Status:** Works, but not ideal. Workarounds coming.
+
+### For Mixed Scenarios
+
+```java
+public class MixedExecutorStrategy {
+    
+    // One-off I/O: Use VT
+    private final ExecutorService ioExecutor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    // Scheduled tasks: Use Platform threads (for now)
+    private final ScheduledExecutorService scheduler = 
+        Executors.newScheduledThreadPool(1);
+    
+    public void handleRequest(Request req) {
+        // I/O: fast, lightweight
+        ioExecutor.submit(() -> processRequest(req));
+        
+        // Scheduled: overhead justified by infrequency
+        scheduler.scheduleAtFixedRate(
+            this::maintenanceTask,
+            0, 1, TimeUnit.HOURS
+        );
+    }
+}
+```
+
+**Status:** Pragmatic approach for current Java versions
+
+---
+
+## Remember: This is Temporary
+
+```
+Current State (Java 21):
+├─ Virtual threads are new ✨
+├─ API coverage is limited
+├─ Gaps are expected
+└─ Solution: Workarounds and patience
+
+Future State (Java 22+):
+├─ More VT-related APIs (expected)
+├─ Scheduled execution support (hoped for)
+├─ Smoother migration path
+└─ Better standard library support
+```
+
+---
+
+## Key Takeaways
+
+1. **Virtual threads are great for I/O tasks** - but only for one-off, immediate execution
+
+2. **Scheduled execution is a gap** - No standard API for periodic VT tasks
+
+3. **Platform threads are still relevant** - For many patterns, they're still the only option
+
+4. **Workarounds exist** - We'll learn them in upcoming lectures (patience!)
+
+5. **This is temporary** - Java will likely fill these gaps in future versions
+
+6. **Be pragmatic** - Use VT where it works, use platform threads where it doesn't (yet)
+
+7. **Stay aware** - Understand the tradeoffs you're making when mixing executor types
+
+---
+
+## Real-World Advice
+
+### For Production Code Today
+
+```java
+// ✅ DO THIS
+ExecutorService ioExecutor = Executors.newVirtualThreadPerTaskExecutor();
+ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(1);
+
+// For I/O tasks
+ioExecutor.submit(() -> slowApiCall());
+
+// For scheduled maintenance
+scheduler.scheduleAtFixedRate(
+    this::maintenanceTasks,
+    0, 5, TimeUnit.MINUTES
+);
+```
+
+### What NOT to Do
+
+```java
+// ❌ DON'T try to force VT where it doesn't fit
+try {
+    Executors.newScheduledVirtualThreadExecutor();  // Doesn't exist!
+} catch (NoSuchMethodError e) {
+    // Of course it doesn't work
+}
+
+// ❌ DON'T give up on VT
+// Virtual threads are still valuable for I/O!
+```
+
+### Mindset
+
+```
+"Virtual threads solve I/O concurrency scaling.
+They don't solve all executor problems... yet.
+
+Be patient.
+Learn the workarounds.
+Understand the tradeoffs.
+Contribute feedback to the Java community."
+```
+
+---
+
+## A Note on Patience
+
+> This lecture acknowledges that the next few lectures might seem frustrating or tedious. You're learning about **limitations and workarounds** rather than exciting new features.
+
+**Why it matters:**
+- Understanding problems deepens understanding of solutions
+- Knowing the "why" helps you design better code
+- Learning workarounds makes you a better engineer
+- This knowledge becomes irrelevant once APIs improve (which is a good thing!)
+
+**Keep the faith:** 
+The journey through these limitations makes you understand virtual threads at a deeper level. The next few lectures build toward practical, production-ready solutions. 🚀
+
+---
+
+## Quick Reference: Current State (Java 21)
+
+```
+Virtual Threads:
+├─ ✅ Great for: One-off I/O tasks
+├─ ✅ Lightweight: ~KB per thread
+├─ ✅ Scalable: Thousands of concurrent tasks
+├─ ❌ Scheduled: No standard API (yet)
+├─ ❌ Pooling: Not the design intent
+└─ ❌ Fixed capacity: Can't limit easily
+
+Next Steps:
+├─ Understand the gap (this lecture)
+├─ Learn workarounds (next lectures)
+├─ Make pragmatic choices (your code)
+└─ Stay tuned for improvements (future Java versions)
+```
+
+---
+
+**Next Lecture Preview:** We'll dive into creating our own scheduled virtual thread executor and explore the creative solutions available today! 🎯
+
+---
+
+**Remember:** Being aware of limitations makes you a better architect. Let's embrace the journey! 💪
