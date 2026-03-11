@@ -3254,3 +3254,763 @@ Application Exits Cleanly ✅
 ---
 
 **Remember:** Virtual threads make concurrency easier, but resource management is still important. Use try-with-resources and let Java do the cleanup automatically! 🧹✨
+
+---
+
+# 📝 Virtual Thread Naming & ThreadFactory: Observability and Debugging
+
+## TL;DR
+
+By default, virtual threads have **no meaningful names**. Use `ThreadFactory` to give them descriptive names for better observability and debugging.
+
+```java
+// ❌ Default: Cryptic names like [virtual-41]
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+
+// ✅ Better: Descriptive names like [aggregator-demo-1]
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("aggregator-demo-", 1)
+        .factory()
+);
+```
+
+---
+
+## The Problem: Virtual Threads Are Invisible by Default
+
+### Default Behavior: Unnamed Threads
+
+When you create an executor without custom naming:
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+executor.submit(() -> Client.getProduct(43));
+executor.submit(() -> Client.getProduct(41));
+executor.submit(() -> Client.getProduct(42));
+```
+
+**Output:**
+```
+22:29:23.925 [virtual-41] INFO Client -- Calling external service for product 43
+22:29:23.925 [virtual-37] INFO Client -- Calling external service for product 41
+22:29:23.925 [virtual-39] INFO Client -- Calling external service for product 42
+22:29:24.947 [main] INFO -- product-41: Durable Marble Clock
+22:29:24.947 [main] INFO -- product-42: Mediocre Aluminum Hat
+22:29:24.947 [main] INFO -- product-43: Practical Marble Bag
+```
+
+### The Problem
+
+```
+Thread names like [virtual-41], [virtual-37], [virtual-39]...
+                        ↓
+❌ Not meaningful
+❌ Hard to correlate in logs
+❌ Difficult to debug
+❌ No semantic meaning
+❌ Next time app runs, numbers change
+```
+
+---
+
+## Understanding ThreadFactory
+
+### What is ThreadFactory?
+
+A `ThreadFactory` is responsible for **creating thread instances**. It's a simple interface:
+
+```java
+public interface ThreadFactory {
+    Thread newThread(Runnable r);
+}
+```
+
+**Purpose:**
+- Customize thread creation
+- Add naming conventions
+- Set thread properties (priority, daemon status, etc.)
+- Apply organization-wide standards
+
+### How Executors Use ThreadFactory
+
+```java
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+// Internally uses a default ThreadFactory that creates threads with generic names
+```
+
+### Creating a Custom ThreadFactory
+
+The traditional way (for platform threads):
+
+```java
+public class MyThreadFactory implements ThreadFactory {
+    private int counter = 0;
+    private final String namePrefix;
+    
+    public MyThreadFactory(String namePrefix) {
+        this.namePrefix = namePrefix;
+    }
+    
+    @Override
+    public Thread newThread(Runnable r) {
+        Thread t = new Thread(r);
+        t.setName(namePrefix + "-" + (++counter));
+        return t;
+    }
+}
+
+// Usage:
+ExecutorService executor = Executors.newFixedThreadPool(
+    10, 
+    new MyThreadFactory("worker")
+);
+```
+
+---
+
+## Virtual Thread Fluent API
+
+### The Elegant Way: Thread.ofVirtual()
+
+Java 21+ provides a fluent API to create virtual thread factories:
+
+```java
+Thread.Builder.OfVirtual factory = Thread.ofVirtual()
+    .name("aggregator-demo-", 1);  // "aggregator-demo-1", "aggregator-demo-2", ...
+
+ThreadFactory threadFactory = factory.factory();
+```
+
+### Breaking It Down
+
+```java
+Thread.ofVirtual()
+    .name("prefix-", 1)  // Name prefix + starting number
+    .factory()           // Convert to ThreadFactory
+```
+
+### What `.name("prefix-", 1)` Does
+
+```
+First thread:  "prefix-1"
+Second thread: "prefix-2"
+Third thread:  "prefix-3"
+...
+
+The second parameter (1) is the STARTING NUMBER
+```
+
+---
+
+## Side-by-Side Comparison
+
+### Version 1: Default (No Custom Names) ❌
+
+```java
+public class DefaultNaming {
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        
+        executor.submit(() -> {
+            System.out.println("Running task 1 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+        
+        executor.submit(() -> {
+            System.out.println("Running task 2 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+        
+        executor.submit(() -> {
+            System.out.println("Running task 3 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+    }
+}
+```
+
+**Output:**
+```
+Running task 1 on: virtual-41
+Running task 2 on: virtual-37
+Running task 3 on: virtual-39
+```
+
+**Problems:**
+- ❌ Names don't indicate purpose
+- ❌ Random-looking numbers (actually sequential, but not obvious)
+- ❌ Hard to trace in logs
+- ❌ No context
+
+---
+
+### Version 2: Custom Names with ThreadFactory ✅
+
+```java
+public class CustomNaming {
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        // Create a custom ThreadFactory
+        ThreadFactory factory = Thread.ofVirtual()
+            .name("aggregator-demo-", 1)  // Descriptive name!
+            .factory();
+        
+        var executor = Executors.newVirtualThreadPerTaskExecutor(factory);
+        
+        executor.submit(() -> {
+            System.out.println("Running task 1 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+        
+        executor.submit(() -> {
+            System.out.println("Running task 2 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+        
+        executor.submit(() -> {
+            System.out.println("Running task 3 on: " + Thread.currentThread().getName());
+            sleep(100);
+        });
+    }
+}
+```
+
+**Output:**
+```
+Running task 1 on: aggregator-demo-1
+Running task 2 on: aggregator-demo-2
+Running task 3 on: aggregator-demo-3
+```
+
+**Benefits:**
+- ✅ Names are descriptive
+- ✅ Easy to identify purpose
+- ✅ Consistent numbering (1, 2, 3, ...)
+- ✅ Clear in logs
+
+---
+
+## Real-World Example: Service-Based Naming
+
+### Scenario: Microservices Architecture
+
+You have multiple services running, each using an executor:
+
+```java
+// Order Service
+var orderExecutor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("order-service-", 1)
+        .factory()
+);
+
+// Payment Service
+var paymentExecutor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("payment-service-", 1)
+        .factory()
+);
+
+// Inventory Service
+var inventoryExecutor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("inventory-service-", 1)
+        .factory()
+);
+```
+
+### Log Output (Easy to Identify Service)
+
+```
+22:30:23.925 [order-service-1] INFO OrderService -- Processing order #1001
+22:30:23.926 [payment-service-1] INFO PaymentService -- Processing payment for $99.99
+22:30:23.927 [inventory-service-1] INFO InventoryService -- Checking stock
+22:30:24.001 [order-service-2] INFO OrderService -- Processing order #1002
+22:30:24.050 [inventory-service-2] INFO InventoryService -- Checking stock
+```
+
+**Without custom naming:**
+```
+22:30:23.925 [virtual-1001] INFO OrderService -- Processing order #1001
+22:30:23.926 [virtual-1002] INFO PaymentService -- Processing payment for $99.99
+22:30:23.927 [virtual-1003] INFO InventoryService -- Checking stock
+```
+
+❌ Which thread is for which service? Unclear!
+
+---
+
+## The AggregatorDemo Example
+
+### Original Code (Default Naming)
+
+```java
+public class Lec03AccessResponseUsingFuture {
+    
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        var aggregator = new AggregatorService(executor);
+        
+        System.out.println("Product 41: " + aggregator.getProduct(41));
+        System.out.println("Product 42: " + aggregator.getProduct(42));
+        System.out.println("Product 43: " + aggregator.getProduct(43));
+    }
+}
+```
+
+**Output:**
+```
+22:29:23.925 [virtual-41] INFO Client -- Calling external service for product 43
+22:29:23.925 [virtual-37] INFO Client -- Calling external service for product 41
+22:29:23.925 [virtual-39] INFO Client -- Calling external service for product 42
+22:29:24.947 [main] INFO -- Product 41: Durable Marble Clock
+22:29:24.947 [main] INFO -- Product 42: Mediocre Aluminum Hat
+22:29:24.947 [main] INFO -- Product 43: Practical Marble Bag
+```
+
+### Improved Code (Custom Naming)
+
+```java
+public class Lec03AccessResponseUsingFuture {
+    
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        // Create executor with custom naming
+        ThreadFactory factory = Thread.ofVirtual()
+            .name("aggregator-demo-", 1)
+            .factory();
+        
+        var executor = Executors.newVirtualThreadPerTaskExecutor(factory);
+        var aggregator = new AggregatorService(executor);
+        
+        System.out.println("Product 41: " + aggregator.getProduct(41));
+        System.out.println("Product 42: " + aggregator.getProduct(42));
+        System.out.println("Product 43: " + aggregator.getProduct(43));
+    }
+}
+```
+
+**Output:**
+```
+22:30:23.925 [aggregator-demo-1] INFO Client -- Calling external service for product 43
+22:30:23.925 [aggregator-demo-2] INFO Client -- Calling external service for product 41
+22:30:23.925 [aggregator-demo-3] INFO Client -- Calling external service for product 42
+22:30:24.947 [main] INFO -- Product 41: Durable Marble Clock
+22:30:24.947 [main] INFO -- Product 42: Mediocre Aluminum Hat
+22:30:24.947 [main] INFO -- Product 43: Practical Marble Bag
+```
+
+✅ Much clearer! Thread names show the purpose immediately.
+
+---
+
+## Virtual Thread Fluent API Deep Dive
+
+### Full Thread.ofVirtual() API
+
+```java
+Thread.Builder.OfVirtual builder = Thread.ofVirtual();
+
+// Configure naming
+builder = builder.name("prefix-", 1);        // Name with counter
+builder = builder.name("fixed-name");        // Fixed name (no counter)
+
+// Configure other properties
+builder = builder.daemon(true);              // Daemon thread
+builder = builder.inheritInheritableThreadLocals(false);  // Thread locals
+
+// Finally, get the factory
+ThreadFactory factory = builder.factory();
+```
+
+### Naming Options
+
+#### Option 1: Prefix with Counter
+
+```java
+Thread.ofVirtual()
+    .name("worker-", 1)
+    .factory()
+// Creates: worker-1, worker-2, worker-3, ...
+```
+
+#### Option 2: Fixed Name (All Same)
+
+```java
+Thread.ofVirtual()
+    .name("fixed-name")
+    .factory()
+// Creates: fixed-name, fixed-name, fixed-name, ...
+// (Usually not recommended - loses identity)
+```
+
+#### Option 3: Complex Naming
+
+```java
+Thread.ofVirtual()
+    .name("service-", 0, "-task-", 1)
+    .factory()
+// Creates: service-0-task-1, service-0-task-2, ...
+// (Multiple counters possible)
+```
+
+---
+
+## Complete Example: Multiple Named Executors
+
+```java
+public class MultiServiceDemo {
+    
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        // Different executor for each service
+        var userService = new UserService(
+            Executors.newVirtualThreadPerTaskExecutor(
+                Thread.ofVirtual()
+                    .name("user-service-", 1)
+                    .factory()
+            )
+        );
+        
+        var orderService = new OrderService(
+            Executors.newVirtualThreadPerTaskExecutor(
+                Thread.ofVirtual()
+                    .name("order-service-", 1)
+                    .factory()
+            )
+        );
+        
+        var paymentService = new PaymentService(
+            Executors.newVirtualThreadPerTaskExecutor(
+                Thread.ofVirtual()
+                    .name("payment-service-", 1)
+                    .factory()
+            )
+        );
+        
+        // Execute tasks
+        var userFuture = userService.getUser(123);
+        var orderFuture = orderService.getOrder(456);
+        var paymentFuture = paymentService.processPayment(789);
+        
+        // Wait for results
+        User user = userFuture.get();
+        Order order = orderFuture.get();
+        Payment payment = paymentFuture.get();
+        
+        System.out.println("User: " + user);
+        System.out.println("Order: " + order);
+        System.out.println("Payment: " + payment);
+    }
+}
+```
+
+**Logs:**
+```
+[user-service-1] INFO UserService -- Fetching user 123
+[order-service-1] INFO OrderService -- Fetching order 456
+[payment-service-1] INFO PaymentService -- Processing payment 789
+[user-service-2] INFO UserService -- Fetching related orders
+[order-service-2] INFO OrderService -- Checking inventory
+[payment-service-2] INFO PaymentService -- Verifying card
+```
+
+✅ **Crystal clear** which service each thread belongs to!
+
+---
+
+## Why This Matters: Debugging Scenario
+
+### Scenario: Production Issue with Default Names
+
+```
+ERROR: TimeoutException in transaction
+Stack trace: [virtual-1241] transaction timeout
+
+Now what?
+- Which service?
+- What was it doing?
+- Was it a database call? API call?
+- Unclear! 😞
+```
+
+### With Custom Names
+
+```
+ERROR: TimeoutException in transaction
+Stack trace: [payment-service-5] transaction timeout
+
+Now you know:
+✅ It's the payment service
+✅ The 5th concurrent payment being processed
+✅ Easy to correlate with other logs
+✅ Easy to debug! 😊
+```
+
+---
+
+## Observability Benefits
+
+### What Custom Naming Enables
+
+```
+1. LOG CORRELATION
+   ├─ [aggregator-demo-1] calls 3 APIs
+   ├─ [aggregator-demo-2] calls 3 APIs
+   └─ Easy to see concurrent requests
+
+2. PERFORMANCE MONITORING
+   ├─ Which service's threads are slow?
+   ├─ Pattern matching: grep for "service-name-"
+   └─ Identify bottlenecks
+
+3. DISTRIBUTED TRACING
+   ├─ Thread name + request ID = full trace
+   ├─ Follow request through all services
+   └─ Find where delay happened
+
+4. DEBUGGING
+   ├─ See which thread caused the error
+   ├─ Reproduce the scenario
+   └─ Faster root cause analysis
+
+5. MONITORING DASHBOARDS
+   ├─ Thread pool metrics per service
+   ├─ Identify over-utilization
+   └─ Capacity planning
+```
+
+---
+
+## Step-by-Step: Converting Default to Custom Names
+
+### Step 1: Understand Current Naming
+
+```java
+// Before
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+```
+
+Output:
+```
+[virtual-41], [virtual-37], [virtual-39]
+```
+
+### Step 2: Create ThreadFactory
+
+```java
+// Step 1: Create builder
+Thread.Builder.OfVirtual builder = Thread.ofVirtual();
+
+// Step 2: Add naming
+builder = builder.name("aggregator-demo-", 1);
+
+// Step 3: Get factory
+ThreadFactory factory = builder.factory();
+```
+
+### Step 3: Pass to Executor
+
+```java
+// Before
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+
+// After
+ThreadFactory factory = Thread.ofVirtual()
+    .name("aggregator-demo-", 1)
+    .factory();
+var executor = Executors.newVirtualThreadPerTaskExecutor(factory);
+```
+
+### Step 4: Run and Verify
+
+```
+[aggregator-demo-1], [aggregator-demo-2], [aggregator-demo-3]
+✅ Much better!
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Application Name
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("myapp-", 1)
+        .factory()
+);
+```
+
+### Pattern 2: Service Name
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("user-service-", 1)
+        .factory()
+);
+```
+
+### Pattern 3: Hierarchical
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("api-", 0, "-handler-", 1)
+        .factory()
+);
+// Creates: api-0-handler-1, api-0-handler-2, ...
+```
+
+### Pattern 4: With Timestamp (Discouraged)
+
+```java
+// NOT RECOMMENDED (names change on each run)
+String timestamp = System.currentTimeMillis();
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("app-" + timestamp + "-", 1)
+        .factory()
+);
+```
+
+---
+
+## Best Practices
+
+### ✅ DO: Use Meaningful Names
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("payment-processor-", 1)
+        .factory()
+);
+```
+
+### ✅ DO: Match Your Architecture
+
+```java
+// Microservices naming
+ThreadFactory orderThreads = Thread.ofVirtual()
+    .name("order-service-", 1)
+    .factory();
+
+ThreadFactory paymentThreads = Thread.ofVirtual()
+    .name("payment-service-", 1)
+    .factory();
+```
+
+### ✅ DO: Be Consistent
+
+```java
+// Consistent naming across your codebase
+"service-name-" prefix + incremental number
+```
+
+### ❌ DON'T: Use Generic Names
+
+```java
+// Bad - not descriptive
+Thread.ofVirtual()
+    .name("thread-", 1)  // Too vague
+    .factory()
+```
+
+### ❌ DON'T: Use Random/Dynamic Names
+
+```java
+// Bad - names change on each run
+Thread.ofVirtual()
+    .name("vt-" + UUID.randomUUID(), 1)
+    .factory()
+```
+
+### ❌ DON'T: Use Very Long Names
+
+```java
+// Bad - too verbose
+Thread.ofVirtual()
+    .name("order-processing-service-main-executor-task-", 1)
+    .factory()
+```
+
+---
+
+## Practical Refactoring Checklist
+
+When improving observability, use this checklist:
+
+- [ ] **Identify all ExecutorServices** in your code
+- [ ] **Determine purpose** of each executor
+- [ ] **Choose descriptive names** (service-name, handler-type, etc.)
+- [ ] **Create ThreadFactory** with custom names
+- [ ] **Pass factory to executor** creation
+- [ ] **Test and verify** names appear in logs
+- [ ] **Document naming convention** for team
+- [ ] **Update monitoring/dashboards** to use new names
+- [ ] **Add examples** to project documentation
+
+---
+
+## Summary Table
+
+| Aspect | Default | Custom |
+|--------|---------|--------|
+| **Thread Name** | [virtual-41] | [aggregator-demo-1] |
+| **Clarity** | ❌ Cryptic | ✅ Descriptive |
+| **Consistency** | ❌ Varies | ✅ Predictable |
+| **Debugging** | ❌ Hard | ✅ Easy |
+| **Logging** | ❌ Generic | ✅ Identifiable |
+| **Monitoring** | ❌ Difficult | ✅ Simple |
+| **Performance** | ✅ Same | ✅ Same |
+| **Memory** | ✅ Same | ✅ Same |
+| **Setup Complexity** | ✅ Simple | ℹ️ 3 lines extra |
+
+---
+
+## Key Takeaways
+
+1. **Virtual threads are numbered by default** - Names like `[virtual-41]` don't mean anything
+
+2. **Use ThreadFactory for custom names** - 3 lines of code for massive clarity improvement
+
+3. **Naming convention** - Use format: `service-name-` with incrementing counter
+
+4. **Observable code is maintainable code** - Invest in good naming
+
+5. **Thread naming doesn't impact performance** - Pure observability benefit, no cost
+
+6. **Document your convention** - Help teammates understand the naming pattern
+
+7. **Use in all executors** - Platform threads AND virtual threads benefit equally
+
+---
+
+## Quick Reference
+
+```java
+// Quick template for custom-named executor:
+var executor = Executors.newVirtualThreadPerTaskExecutor(
+    Thread.ofVirtual()
+        .name("your-service-name-", 1)  // Change this!
+        .factory()
+);
+```
+
+**Before:** `[virtual-1], [virtual-2], [virtual-3]`  
+**After:** `[your-service-name-1], [your-service-name-2], [your-service-name-3]`
+
+✅ Done! Your logs are now clear and maintainable. 🎉
+
+---
+
+## Further Reading
+
+- [Java Thread.Builder Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Thread.Builder.html)
+- [Virtual Threads Overview](https://openjdk.org/jeps/444)
+- [ThreadFactory Interface](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ThreadFactory.html)
+
+---
+
+**Remember:** Good thread naming costs almost nothing and helps tremendously with debugging and monitoring. Always name your threads! 📝✨
