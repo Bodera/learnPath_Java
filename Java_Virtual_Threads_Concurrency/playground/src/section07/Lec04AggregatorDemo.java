@@ -28,7 +28,6 @@ public class Lec04AggregatorDemo {
 
         List<ProductDto> products = futures.stream().map(Lec04AggregatorDemo::toProductDto).toList();
         LOGGER.info("list: {}", products);
-
     }
 
     private static ProductDto toProductDto(Future<ProductDto> future) {
