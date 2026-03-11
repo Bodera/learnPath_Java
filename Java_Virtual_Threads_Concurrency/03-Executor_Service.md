@@ -4730,3 +4730,924 @@ Next Steps:
 ---
 
 **Remember:** Being aware of limitations makes you a better architect. Let's embrace the journey! 💪
+
+---
+
+# 🚦 Concurrency Limits: Why VT Pooling is Wrong & How to Fix It
+
+## TL;DR
+
+**Virtual threads should NEVER be pooled.** Even though `FixedThreadPool` accepts a `ThreadFactory`, passing a virtual thread factory defeats the purpose and violates VT design principles.
+
+```java
+// ❌ DON'T: Pools virtual threads (violates design)
+var factory = Thread.ofVirtual().name("vt-", 1).factory();
+var executor = Executors.newFixedThreadPool(3, factory);  // WRONG!
+
+// ✅ DO: Use Semaphore for concurrency limits
+var semaphore = new Semaphore(3);
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+executor.submit(() -> {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();
+    }
+});
+```
+
+---
+
+## The Problem: Rate Limiting External Services
+
+### Real-World Scenario
+
+Your application needs to call an external product API:
+
+```
+API Rate Limit: "Maximum 3 concurrent calls"
+         ↓
+Your requirement: Submit 20 tasks, but respect the limit
+         ↓
+Goal: Process all 20, but only 3 at a time
+```
+
+### The Code Example
+
+```java
+public class Lec05ConcurrencyLimit {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+        Lec05ConcurrencyLimit.class
+    );
+
+    static void main() {
+        execute(Executors.newCachedThreadPool(), 20);
+    }
+
+    private static void printProductInfo(int id) {
+        LOGGER.info("{} => {}", id, Client.getProduct(id));
+    }
+
+    private static void execute(ExecutorService executor, int taskCount) {
+        try (executor) {
+            for (int i = 1; i <= taskCount; i++) {
+                int j = i;
+                executor.execute(() -> printProductInfo(j));
+            }
+            LOGGER.info("task submitted");
+        }
+    }
+}
+```
+
+---
+
+## Version 1: Unlimited Concurrency ❌ (Too Fast)
+
+### The Code
+
+```java
+static void main() {
+    execute(Executors.newCachedThreadPool(), 20);
+}
+```
+
+### What Happens
+
+The `CachedThreadPool` creates **as many threads as needed**:
+
+```
+Task 1  → Thread 1 → API Call
+Task 2  → Thread 2 → API Call
+Task 3  → Thread 3 → API Call
+...
+Task 20 → Thread 20 → API Call
+
+All 20 calls run simultaneously! 🚀
+```
+
+### Output
+
+```
+00:26:46.761 [pool-1-thread-1] INFO Client -- Calling http://localhost:7070/product/1
+00:26:46.761 [pool-1-thread-2] INFO Client -- Calling http://localhost:7070/product/2
+00:26:46.761 [pool-1-thread-3] INFO Client -- Calling http://localhost:7070/product/3
+00:26:46.761 [pool-1-thread-4] INFO Client -- Calling http://localhost:7070/product/4
+... (all 20 at once!)
+```
+
+### The Problem
+
+```
+You: "Make 20 API calls"
+API: "Sure, but only 3 at a time!"
+You: "OK" (submits all 20)
+Reality: All 20 hit the API simultaneously
+Result: ❌ API rate limit exceeded!
+        ❌ Requests fail or get throttled
+        ❌ Service returns 429 Too Many Requests
+```
+
+### Visualization
+
+```
+Timeline: 0ms ─────── 1000ms ─────── 2000ms
+
+Concurrent Calls at any given moment:
+│
+20 ├─────────────────────────────────────
+   │  ████████████████████ (all 20!)
+   │
+15 ├─────────────────────────────────────
+   │
+10 ├─────────────────────────────────────
+   │
+5  ├─────────────────────────────────────
+   │
+0  └─────────────────────────────────────
+   
+Status: ❌ Violates API contract (max 3 concurrent)
+```
+
+---
+
+## Version 2: Limited Concurrency with FixedThreadPool ✅ (But Wrong For VT!)
+
+### The Code
+
+```java
+static void main() {
+    execute(Executors.newFixedThreadPool(3), 20);
+}
+```
+
+### What Happens
+
+`FixedThreadPool(3)` creates exactly **3 platform threads**:
+
+```
+Initial State:
+├─ Thread 1: idle
+├─ Thread 2: idle
+└─ Thread 3: idle
+
+Task 1-3:  → [Threads 1-3 run immediately]
+Task 4-20: → [Queued, waiting for threads to free up]
+
+As tasks complete:
+├─ Thread 1 finishes → picks Task 4 from queue
+├─ Thread 2 finishes → picks Task 5 from queue
+└─ Thread 3 finishes → picks Task 6 from queue
+```
+
+### Output
+
+```
+00:26:46.761 [pool-1-thread-1] INFO Client -- Calling product/1
+00:26:46.761 [pool-1-thread-2] INFO Client -- Calling product/2
+00:26:46.761 [pool-1-thread-3] INFO Client -- Calling product/3
+(pause... waiting for one to complete)
+00:26:47.761 [pool-1-thread-1] INFO Client -- Calling product/4
+00:26:47.761 [pool-1-thread-2] INFO Client -- Calling product/5
+00:26:47.761 [pool-1-thread-3] INFO Client -- Calling product/6
+...
+```
+
+### The Solution (For Platform Threads)
+
+```
+Status: ✅ Works correctly!
+        ✅ Respects rate limit (max 3 concurrent)
+        ❌ But uses expensive platform threads
+```
+
+### Visualization
+
+```
+Timeline: 0ms ────── 1s ────── 2s ────── 3s ─────
+
+Concurrent Calls at any given moment:
+│
+5  ├─────────────────────────────────────
+   │
+3  ├──███───███───███───███───███───────
+   │  (always exactly 3 or less)
+1  ├─────────────────────────────────────
+   │
+0  └─────────────────────────────────────
+   
+Status: ✅ Respects API contract
+```
+
+---
+
+## Version 3: The Tempting BUT WRONG Approach ❌
+
+### The Attempted "Fix"
+
+Someone thinks: "Virtual threads are lightweight, let me pass a VT factory to FixedThreadPool!"
+
+```java
+static void main() {
+    var factory = Thread.ofVirtual().name("bodera-virtual", 1).factory();
+    execute(Executors.newFixedThreadPool(3, factory), 20);
+}
+```
+
+### Output
+
+```
+00:26:46.761 [bodera-virtual-1] INFO Client -- Calling product/1
+00:26:46.761 [bodera-virtual-2] INFO Client -- Calling product/2
+00:26:46.761 [bodera-virtual-3] INFO Client -- Calling product/3
+00:26:46.761 [bodera-virtual-1] INFO Client -- Calling product/4
+00:26:46.761 [bodera-virtual-2] INFO Client -- Calling product/5
+...
+```
+
+### Why This LOOKS Right But Is Actually WRONG
+
+```
+It seems to work:
+✅ Only 3 threads in use
+✅ Rate limit respected
+✅ Virtual thread names visible
+
+But underneath:
+❌ FixedThreadPool creates 3 VTs and REUSES them (pooling!)
+❌ VTs are supposed to be disposable, per-task
+❌ Violates VT design principles
+❌ Ignores Oracle's explicit recommendation
+```
+
+### The Core Issue
+
+```
+FixedThreadPool's Behavior:
+
+for (int i = 0; i < poolSize; i++) {
+    Thread thread = factory.newThread(...);  // Create thread via factory
+    threads[i] = thread;                     // Store in array
+}
+
+// For each task:
+for (Task task : allTasks) {
+    availableThread.execute(task);  // REUSE the same thread
+    // ← This is pooling!
+}
+```
+
+### The Violation
+
+```
+What FixedThreadPool Does:
+├─ Create 3 threads via factory
+├─ Store them in pool
+└─ Reuse them forever
+   └─ Thread 1 runs Task 1, then Task 4, then Task 7, etc.
+   └─ Thread 2 runs Task 2, then Task 5, then Task 8, etc.
+   └─ Thread 3 runs Task 3, then Task 6, then Task 9, etc.
+
+What Virtual Threads Are Designed For:
+├─ Create 1 thread per task
+├─ Run it once
+└─ Discard it
+```
+
+### Oracle's Explicit Recommendation
+
+> **"Don't pool virtual threads. Create one for every application task. Virtual threads are short-lived and have shallow call stacks. They don't need the additional overhead or the functionality of thread pools."**
+> 
+> — Oracle Java Documentation
+
+---
+
+## Version 4: The CORRECT Approach with Semaphore ✅
+
+### Understanding Semaphore
+
+A `Semaphore` is a synchronization primitive that:
+- Maintains a **permit count**
+- `acquire()`: Wait until a permit is available, then take it
+- `release()`: Give back a permit
+- Perfect for **rate limiting**
+
+```java
+Semaphore semaphore = new Semaphore(3);
+// ↑ Allows 3 concurrent operations
+```
+
+### How It Works
+
+```
+Initialization: Semaphore(3)
+├─ Available permits: 3
+
+Task 1 arrives:
+├─ acquire() → Takes 1 permit
+├─ Available: 2
+└─ Runs
+
+Task 2 arrives:
+├─ acquire() → Takes 1 permit
+├─ Available: 1
+└─ Runs
+
+Task 3 arrives:
+├─ acquire() → Takes 1 permit
+├─ Available: 0
+└─ Runs
+
+Task 4 arrives:
+├─ acquire() → BLOCKS (no permits available!)
+├─ Waits...
+
+Task 1 finishes:
+├─ release() → Returns 1 permit
+├─ Available: 1
+└─ Task 4 can now acquire()
+```
+
+### The Solution
+
+```java
+public class Lec05ConcurrencyLimitFixed {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+        Lec05ConcurrencyLimitFixed.class
+    );
+    
+    private static final int CONCURRENCY_LIMIT = 3;
+    private static final Semaphore semaphore = new Semaphore(CONCURRENCY_LIMIT);
+
+    static void main() throws InterruptedException {
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        
+        try (executor) {
+            for (int i = 1; i <= 20; i++) {
+                int id = i;
+                executor.submit(() -> executeWithLimit(id));
+            }
+            LOGGER.info("All 20 tasks submitted");
+        }
+    }
+
+    private static void executeWithLimit(int id) {
+        try {
+            semaphore.acquire();  // ← Request permission
+            try {
+                printProductInfo(id);
+            } finally {
+                semaphore.release();  // ← Release permission
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static void printProductInfo(int id) {
+        LOGGER.info("{} => {}", id, Client.getProduct(id));
+    }
+}
+```
+
+### Output
+
+```
+00:26:46.761 [virtual-1] INFO Client -- Calling product/1
+00:26:46.761 [virtual-2] INFO Client -- Calling product/2
+00:26:46.761 [virtual-3] INFO Client -- Calling product/3
+(pause... waiting for permits)
+00:26:47.761 [virtual-4] INFO Client -- Calling product/4
+00:26:47.761 [virtual-5] INFO Client -- Calling product/5
+00:26:47.761 [virtual-6] INFO Client -- Calling product/6
+(pause... waiting for permits)
+...
+All 20 tasks submitted
+```
+
+### Why This Is CORRECT ✅
+
+```
+✅ Uses virtual threads (lightweight, per-task)
+✅ Respects Semaphore limit (max 3 concurrent)
+✅ Each VT is disposable (created, used, discarded)
+✅ No pooling (honors VT design)
+✅ Clean separation: VT creation vs rate limiting
+✅ Easy to adjust limit (change Semaphore parameter)
+```
+
+---
+
+## Visual Comparison: All Approaches
+
+### Approach 1: CachedThreadPool (Unlimited)
+
+```
+Timeline: 0ms ────── 1s ────── 2s
+
+Concurrent API Calls:
+20 ├█████████████████████████████
+   │ (All 20 at once!)
+   │
+0  └─────────────────────────────
+
+Status: ❌ API rate limit exceeded
+```
+
+### Approach 2: FixedThreadPool(3) with Platform Threads
+
+```
+Timeline: 0ms ────── 1s ────── 2s ────── 3s
+
+Concurrent API Calls:
+3  ├──███───███───███───███───███
+   │ (Always 3)
+   │
+0  └──────────────────────────────
+
+Status: ✅ Rate limit respected
+        ❌ Expensive platform threads
+```
+
+### Approach 3: FixedThreadPool(3) with VT Factory (WRONG)
+
+```
+Timeline: 0ms ────── 1s ────── 2s ────── 3s
+
+Concurrent API Calls:
+3  ├──███───███───███───███───███
+   │ (Always 3)
+   │
+0  └──────────────────────────────
+
+Status: ✅ Rate limit respected
+        ❌ Violates VT design (pooling)
+        ❌ Oracle explicitly recommends against
+```
+
+### Approach 4: newVirtualThreadPerTaskExecutor() + Semaphore (CORRECT)
+
+```
+Timeline: 0ms ────── 1s ────── 2s ────── 3s
+
+Concurrent API Calls:
+3  ├──███───███───███───███───███
+   │ (Always 3)
+   │
+0  └──────────────────────────────
+
+Status: ✅ Rate limit respected
+        ✅ Uses VT correctly (per-task)
+        ✅ Follows Oracle recommendations
+        ✅ Lightweight and scalable
+```
+
+---
+
+## Semaphore Deep Dive
+
+### What is a Semaphore?
+
+A `Semaphore` is like a bouncer at an exclusive club:
+
+```
+Club Capacity: 3 people max
+
+Person 1 arrives:
+├─ "Can I enter?"
+├─ Bouncer: "Yes, we have 3 spots"
+├─ Spots left: 2
+└─ Enters
+
+Person 2 arrives:
+├─ "Can I enter?"
+├─ Bouncer: "Yes, we have 2 spots"
+├─ Spots left: 1
+└─ Enters
+
+Person 3 arrives:
+├─ "Can I enter?"
+├─ Bouncer: "Yes, we have 1 spot"
+├─ Spots left: 0
+└─ Enters
+
+Person 4 arrives:
+├─ "Can I enter?"
+├─ Bouncer: "No, we're full"
+└─ WAIT outside
+
+Person 1 leaves:
+├─ Bouncer: "You can leave, thanks"
+├─ Spots left: 1
+└─ Person 4: "Can I enter now?"
+   ├─ Bouncer: "Yes!"
+   └─ Enters
+```
+
+### Java Semaphore API
+
+```java
+// Create with N permits
+Semaphore sem = new Semaphore(3);
+
+// Acquire a permit (blocks if unavailable)
+sem.acquire();        // Waits if needed
+sem.acquireUninterruptibly();  // Can't be interrupted
+sem.tryAcquire();     // Non-blocking, returns boolean
+sem.tryAcquire(1, TimeUnit.SECONDS);  // Timeout
+
+// Release a permit
+sem.release();        // Give back 1 permit
+sem.release(2);       // Give back 2 permits
+
+// Query state
+int available = sem.availablePermits();
+```
+
+---
+
+## Real-World Example: Multiple Rate Limits
+
+### Scenario: Managing Multiple External Services
+
+```java
+public class RateLimitedServiceAggregator {
+    
+    private final Semaphore userServiceLimit = new Semaphore(5);
+    private final Semaphore orderServiceLimit = new Semaphore(3);
+    private final Semaphore paymentServiceLimit = new Semaphore(2);
+    
+    private final ExecutorService executor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    public UserDto getUser(int userId) {
+        return executeWithLimit(
+            userServiceLimit,
+            () -> userService.getUser(userId)
+        );
+    }
+    
+    public OrderDto getOrder(int orderId) {
+        return executeWithLimit(
+            orderServiceLimit,
+            () -> orderService.getOrder(orderId)
+        );
+    }
+    
+    public PaymentDto processPayment(PaymentRequest req) {
+        return executeWithLimit(
+            paymentServiceLimit,
+            () -> paymentService.process(req)
+        );
+    }
+    
+    private <T> T executeWithLimit(Semaphore limit, Callable<T> task) {
+        try {
+            limit.acquire();
+            try {
+                return task.call();
+            } finally {
+                limit.release();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
+```
+
+### Output Flow
+
+```
+User Service: Can make 5 concurrent calls
+Order Service: Can make 3 concurrent calls  
+Payment Service: Can make 2 concurrent calls
+
+Request 1: User + Order + Payment
+├─ User call: acquire (4 left)
+├─ Order call: acquire (2 left)
+├─ Payment call: acquire (1 left)
+└─ All proceed in parallel (but rate-limited)
+
+Request 2: User + Order + Payment
+├─ User call: acquire (3 left)
+├─ Order call: acquire (1 left)
+├─ Payment call: BLOCKS (0 left)
+│  └─ Waits for existing payment to complete
+├─ Existing payment finishes: release
+└─ Payment call: now acquires
+```
+
+---
+
+## Common Patterns
+
+### Pattern 1: Simple Rate Limiting
+
+```java
+private static final Semaphore rateLimiter = new Semaphore(3);
+
+public void processItem(Item item) {
+    executor.submit(() -> {
+        try {
+            rateLimiter.acquire();
+            try {
+                expensiveOperation(item);
+            } finally {
+                rateLimiter.release();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    });
+}
+```
+
+### Pattern 2: Try-Acquire with Timeout
+
+```java
+public boolean tryProcessWithTimeout(Item item) {
+    try {
+        if (rateLimiter.tryAcquire(1, TimeUnit.SECONDS)) {
+            try {
+                expensiveOperation(item);
+                return true;
+            } finally {
+                rateLimiter.release();
+            }
+        } else {
+            LOGGER.warn("Rate limit exceeded, dropping request");
+            return false;
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return false;
+    }
+}
+```
+
+### Pattern 3: Batch Operations
+
+```java
+public void processBatch(List<Item> items) {
+    var futures = items.stream()
+        .map(item -> executor.submit(() -> {
+            try {
+                rateLimiter.acquire();
+                try {
+                    return processItem(item);
+                } finally {
+                    rateLimiter.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
+            }
+        }))
+        .toList();
+    
+    // Wait for all to complete
+    futures.forEach(future -> {
+        try {
+            future.get();
+        } catch (ExecutionException | InterruptedException e) {
+            LOGGER.error("Batch processing failed", e);
+        }
+    });
+}
+```
+
+---
+
+## Key Mistakes to Avoid
+
+### ❌ Mistake 1: Pooling Virtual Threads
+
+```java
+// WRONG - violates VT design
+var factory = Thread.ofVirtual().factory();
+var executor = Executors.newFixedThreadPool(3, factory);
+executor.submit(() -> doWork());
+```
+
+**Why it's wrong:**
+- VTs are designed to be created per-task
+- Pooling defeats the lightweight advantage
+- Violates Oracle's explicit recommendation
+
+### ❌ Mistake 2: Forgetting release() in Exception
+
+```java
+// WRONG - if exception occurs, permit is never released
+semaphore.acquire();
+doWork();  // ← If this throws, release() never called
+semaphore.release();
+```
+
+**Fix:**
+```java
+semaphore.acquire();
+try {
+    doWork();
+} finally {
+    semaphore.release();  // ← Always called, even on exception
+}
+```
+
+### ❌ Mistake 3: Not Handling InterruptedException
+
+```java
+// WRONG - ignores interruption
+try {
+    semaphore.acquire();
+    doWork();
+} catch (InterruptedException e) {
+    // Silently ignored!
+}
+```
+
+**Fix:**
+```java
+try {
+    semaphore.acquire();
+    doWork();
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();  // ← Restore interrupt flag
+    throw new RuntimeException(e);
+}
+```
+
+---
+
+## Semaphore vs Other Approaches
+
+| Approach | Works | VT-Friendly | Rate-Limited | Complexity |
+|----------|-------|-----------|--------------|-----------|
+| CachedThreadPool | ✅ | ❌ | ❌ | Low |
+| FixedThreadPool(PT) | ✅ | ❌ | ✅ | Low |
+| FixedThreadPool(VT) | ✅ | ❌ | ✅ | Low (**Wrong!**) |
+| VT + Semaphore | ✅ | ✅ | ✅ | Medium |
+| VT + Custom Limiter | ✅ | ✅ | ✅ | High |
+
+---
+
+## Best Practices
+
+### ✅ DO: Use Semaphore for Rate Limiting
+
+```java
+var semaphore = new Semaphore(3);
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+
+executor.submit(() -> {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();
+    }
+});
+```
+
+### ✅ DO: Extract to Helper Method
+
+```java
+public <T> T withRateLimit(Semaphore limit, Callable<T> task) {
+    try {
+        limit.acquire();
+        try {
+            return task.call();
+        } finally {
+            limit.release();
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new RuntimeException(e);
+    } catch (Exception e) {
+        throw new RuntimeException(e);
+    }
+}
+
+// Usage:
+executor.submit(() -> withRateLimit(semaphore, () -> {
+    doWork();
+    return null;
+}));
+```
+
+### ❌ DON'T: Pool Virtual Threads
+
+```java
+// WRONG
+var factory = Thread.ofVirtual().factory();
+var executor = Executors.newFixedThreadPool(3, factory);
+```
+
+### ❌ DON'T: Use Platform Thread Pool for VT
+
+```java
+// WRONG - conceptually inconsistent
+var executor = Executors.newFixedThreadPool(3);
+// Now you've limited to 3 threads, but you're using platform threads
+// Defeats the purpose of lightweight VT
+```
+
+---
+
+## When to Use Each
+
+### Use Semaphore When:
+- ✅ You have VT per-task executor
+- ✅ You need rate limiting
+- ✅ You want to respect external service limits
+- ✅ You need fine-grained concurrency control
+
+### Use FixedThreadPool When:
+- ✅ You want simple, familiar API
+- ✅ You're okay with platform threads (for now)
+- ✅ You have CPU-bound work
+- ✅ You need traditional thread pool semantics
+
+### Never Use:
+- ❌ FixedThreadPool with VT factory
+- ❌ CachedThreadPool for unlimited calls (without limits)
+- ❌ Semaphore with negative permits
+- ❌ Pooling pattern with virtual threads
+
+---
+
+## Summary Table
+
+| Scenario | Solution | Why |
+|----------|----------|-----|
+| Call API with rate limit (3 max) | Semaphore(3) + VT executor | Respects limit, uses VT correctly |
+| Need fixed 10 concurrent workers | FixedThreadPool(10) | Simple, clear intent |
+| I/O with no constraints | newVirtualThreadPerTaskExecutor() | Lightweight, per-task |
+| Periodic scheduled tasks | newScheduledThreadPool(1) | No VT API yet |
+| CPU-bound divide-and-conquer | ForkJoinPool | Designed for CPU work |
+
+---
+
+## Key Takeaways
+
+1. **Never pool virtual threads** - Even though FixedThreadPool accepts ThreadFactory, it's wrong for VT
+
+2. **Use Semaphore for rate limiting** - The correct way to limit concurrent VT execution
+
+3. **VTs are disposable** - Create one per task, don't reuse them in a pool
+
+4. **Oracle is explicit** - "Don't pool virtual threads. Create one for every application task."
+
+5. **Semaphore is simple** - Just wrap your work with acquire/release
+
+6. **Try-finally is essential** - Always release, even if exception occurs
+
+7. **This pattern is reusable** - Use it everywhere you need rate limiting with VT
+
+---
+
+## Quick Reference
+
+### The Wrong Way (Don't Do This)
+
+```java
+var factory = Thread.ofVirtual().factory();
+var executor = Executors.newFixedThreadPool(3, factory);  // ❌ WRONG
+```
+
+### The Right Way
+
+```java
+var semaphore = new Semaphore(3);
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+
+executor.submit(() -> {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();
+    }
+});
+```
+
+**Remember:** Rate limiting != Thread pooling. Use the right tool for the job! 🚦
+
+---
+
+## Further Reading
+
+- [Java Semaphore Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Semaphore.html)
+- [Virtual Threads JEP 444](https://openjdk.org/jeps/444)
+- [Project Loom: Virtual Threads](https://wiki.openjdk.org/display/loom/Main)
+
+---
+
+**Next Concept:** Now that you understand why NOT to pool VTs, let's explore alternative patterns for scenarios where you need more control! 🚀
