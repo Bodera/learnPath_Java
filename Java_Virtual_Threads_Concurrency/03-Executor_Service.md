@@ -5651,3 +5651,996 @@ executor.submit(() -> {
 ---
 
 **Next Concept:** Now that you understand why NOT to pool VTs, let's explore alternative patterns for scenarios where you need more control! 🚀
+
+---
+
+# 🔐 Semaphores Explained: Beyond Basic Rate Limiting
+
+## TL;DR
+
+**Semaphore** = A synchronization primitive that controls access to a shared resource using **permits**.
+
+```java
+// Create a semaphore with 3 permits (max 3 concurrent)
+Semaphore semaphore = new Semaphore(3);
+
+// Thread acquires a permit (blocks if none available)
+semaphore.acquire();
+try {
+    // Critical section - only 3 threads here at a time
+    doWork();
+} finally {
+    // Release the permit for waiting threads
+    semaphore.release();
+}
+```
+
+**Key insight:** Unlike `synchronized` or `ReentrantLock`, semaphores don't pin virtual threads and can be released by any thread!
+
+---
+
+## What is a Semaphore?
+
+### High-Level Concept
+
+Imagine a **nightclub with a capacity of 3 people**:
+
+```
+Club Capacity: 3
+
+Person A arrives → Bouncer: "You have 3 permits, enter"
+Person B arrives → Bouncer: "You have 2 permits, enter"
+Person C arrives → Bouncer: "You have 1 permit, enter"
+Person D arrives → Bouncer: "No permits left, wait outside"
+
+Person A leaves → Bouncer: "Thank you, here's a permit back"
+Person D: "Can I enter now?" → Bouncer: "Yes! 1 permit available"
+```
+
+### In Java Terms
+
+```java
+Semaphore semaphore = new Semaphore(3);  // 3 permits
+
+// Thread acquires permit (equivalent to Person entering)
+semaphore.acquire();      // Permits now: 2
+
+// Thread does work (Person is inside)
+doWork();
+
+// Thread releases permit (Person leaves)
+semaphore.release();      // Permits now: 3
+```
+
+---
+
+## Semaphore vs Lock vs synchronized
+
+### Conceptual Differences
+
+```
+synchronized (Binary - exclusive access)
+├─ Lock acquired by thread A
+├─ Thread B BLOCKED
+├─ Thread A releases lock
+└─ Thread B can acquire
+
+ReentrantLock (Binary - exclusive access)
+├─ Lock acquired by thread A
+├─ Thread B BLOCKED  
+├─ ONLY thread A can release
+└─ Thread B can acquire
+
+Semaphore (N-permits - shared access)
+├─ 3 permits available
+├─ Threads A, B, C acquire (1 each)
+├─ Thread D BLOCKED
+├─ ANY of A, B, C can release
+└─ Thread D can acquire when permit available
+```
+
+### Visual Comparison Diagram
+
+```
+LOCK (Binary):                 SEMAPHORE (N-permits):
+┌────────────────┐            ┌─────────────────────┐
+│   LOCK = 1     │            │  PERMITS = 3        │
+└────────────────┘            └─────────────────────┘
+       │                              │ │ │
+   ┌───┴────┐                    ┌────┼─┼─┴───────┐
+   │        │                    │    │ │         │
+Thread1  Thread2               Thread1 Thread2  Thread3
+(locked) (waiting)             (acquire)(acquire)(acquire)
+                               
+Thread4 must WAIT              Thread4 must WAIT
+(no other permits)             (no permits left)
+```
+
+---
+
+## How Semaphore Works (Detailed)
+
+### The Permit Pool Mechanism
+
+```
+INITIALIZATION:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: available      │
+│ ├─ Permit 2: available      │
+│ └─ Permit 3: available      │
+│                             │
+│ Total: 3 available permits  │
+└─────────────────────────────┘
+
+THREAD A ACQUIRES:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: TAKEN by A     │
+│ ├─ Permit 2: available      │
+│ └─ Permit 3: available      │
+│                             │
+│ Total: 2 available permits  │
+└─────────────────────────────┘
+
+THREAD B ACQUIRES:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: TAKEN by A     │
+│ ├─ Permit 2: TAKEN by B     │
+│ └─ Permit 3: available      │
+│                             │
+│ Total: 1 available permit   │
+└─────────────────────────────┘
+
+THREAD C ACQUIRES:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: TAKEN by A     │
+│ ├─ Permit 2: TAKEN by B     │
+│ └─ Permit 3: TAKEN by C     │
+│                             │
+│ Total: 0 available permits  │
+└─────────────────────────────┘
+
+THREAD D ARRIVES:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: TAKEN by A     │
+│ ├─ Permit 2: TAKEN by B     │
+│ └─ Permit 3: TAKEN by C     │
+│                             │
+│ D is BLOCKED (waiting queue)│
+└─────────────────────────────┘
+
+THREAD A RELEASES:
+┌─────────────────────────────┐
+│ Semaphore(3)                │
+│ ├─ Permit 1: available      │
+│ ├─ Permit 2: TAKEN by B     │
+│ └─ Permit 3: TAKEN by C     │
+│                             │
+│ D acquired Permit 1!        │
+│ Total: 0 available permits  │
+└─────────────────────────────┘
+```
+
+---
+
+## The Key Difference: Who Can Release?
+
+### ReentrantLock (Strict)
+
+```
+Lock Requirements:
+├─ ONLY the thread that acquired the lock can release it
+├─ Violating this = IllegalMonitorStateException
+└─ Prevents accidents but limits flexibility
+
+Example:
+    Thread A acquires lock
+    Thread A enters critical section
+    Thread A MUST release (no one else can)
+```
+
+### Semaphore (Flexible)
+
+```
+Semaphore Permission:
+├─ ANY thread can release a permit
+├─ Even a thread that never acquired it!
+└─ Enables advanced patterns
+
+Example:
+    Thread A acquires permit
+    Thread A enters critical section
+    Thread B, C, or even new Thread D can release
+```
+
+### Diagram: Lock vs Semaphore Release
+
+```
+REENTRANT LOCK:
+Thread A: [acquire] → [execute] → [MUST release]
+                                         ↑
+                               Only Thread A can do this
+
+Thread B: Cannot release (will throw exception)
+Thread C: Cannot release (will throw exception)
+
+SEMAPHORE:
+Thread A: [acquire] → [execute] → [release] ✅
+Thread B: Can also release ✅
+Thread C: Can also release ✅
+Thread D: Can also release ✅
+```
+
+---
+
+## The Crazy Use Case: Deferred Release
+
+### The Scenario
+
+Imagine you want to:
+1. Acquire a permit in Thread A
+2. Do some work
+3. Spawn a background task (Virtual Thread)
+4. Let the background task release the permit later
+
+```java
+public class DeferredReleaseExample {
+    
+    private static final Semaphore semaphore = new Semaphore(3);
+    
+    public void processWithDeferredRelease() {
+        try {
+            semaphore.acquire();
+            LOGGER.info("Acquired permit, processing...");
+            
+            // Do some immediate work
+            doImmediateWork();
+            
+            // Now spawn a background task to handle cleanup
+            // and permit release
+            Thread.ofVirtual().start(() -> {
+                try {
+                    Thread.sleep(Duration.ofSeconds(5));  // Simulate async work
+                    LOGGER.info("Background task releasing permit");
+                    semaphore.release();  // Any thread can release!
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            
+            // Original thread continues without waiting
+            LOGGER.info("Original thread continuing...");
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+```
+
+### Timeline Diagram
+
+```
+Time →
+
+Thread A:
+  0ms:  [acquire permit]
+        permits = 2
+  
+  10ms: [do immediate work]
+  
+  20ms: [spawn VT, return immediately]
+        (doesn't wait for VT!)
+        
+  
+Virtual Thread (background):
+  0ms:  [idle]
+  
+  5000ms: [wake up]
+  
+  5010ms: [release permit]
+           permits = 3
+
+Thread B (waiting):
+  0ms:    [trying to acquire]
+           BLOCKED (no permits)
+  
+  5010ms: [finally acquires permit]
+           (after VT releases)
+```
+
+---
+
+## The Exclusive Access Use Case
+
+### Scenario: Some Threads Want ALL Permits
+
+Imagine in our nightclub:
+- 3 VIP people can coexist (each takes 1 permit)
+- But sometimes a celebrity arrives and wants the club ALL to themselves
+- Celebrity acquires ALL 3 permits at once!
+
+### Implementation
+
+```java
+public class ExclusiveAccessExample {
+    
+    private static final Semaphore semaphore = new Semaphore(3);
+    
+    // Normal thread: acquire 1 permit
+    public void normalThreadAccess() {
+        try {
+            semaphore.acquire(1);  // Get 1 permit
+            try {
+                doWork();
+            } finally {
+                semaphore.release(1);  // Release 1 permit
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+    
+    // Celebrity thread: acquire ALL 3 permits
+    public void exclusiveAccess() {
+        try {
+            semaphore.acquire(3);  // Get ALL permits!
+            try {
+                LOGGER.info("Celebrity: I have exclusive access!");
+                doExclusiveWork();
+            } finally {
+                semaphore.release(3);  // Release all 3
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+```
+
+### Timeline Diagram
+
+```
+Time →
+
+Initial State:
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][2][3]  │
+└─────────────────────┘
+
+Thread A (normal): acquires(1)
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [A][2][3]  │
+└─────────────────────┘
+
+Thread B (normal): acquires(1)
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [A][B][3]  │
+└─────────────────────┘
+
+Thread C (normal): acquires(1)
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [A][B][C]  │
+└─────────────────────┘
+
+Thread D (normal): tries to acquire(1)
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [A][B][C]  │
+│ D: BLOCKED          │
+└─────────────────────┘
+
+Later: Thread A releases
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][B][C]  │
+└─────────────────────┘
+
+Thread E (celebrity): tries to acquire(3)
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][B][C]  │
+│ E: BLOCKED          │
+│ (needs all 3!)      │
+└─────────────────────┘
+
+Thread B releases:
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][2][C]  │
+│ E: STILL BLOCKED    │
+└─────────────────────┘
+
+Thread C releases:
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][2][3]  │
+│ E: NOW ACQUIRES!    │
+└─────────────────────┘
+
+Thread E has exclusive access
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [E][E][E]  │
+│ A, B, C, D: BLOCKED │
+└─────────────────────┘
+
+Thread E releases(3):
+┌─────────────────────┐
+│ Semaphore(3)        │
+│ Permits: [1][2][3]  │
+│ Others can now use  │
+└─────────────────────┘
+```
+
+---
+
+## Virtual Threads + Semaphore: The Game Changer
+
+### Why Semaphore Works Better with VT
+
+#### The Problem with synchronized/Lock
+
+```
+synchronized blocks PIN virtual threads:
+
+Platform Thread (carrier):
+├─ Virtual Thread A enters synchronized block
+│  └─ VT A gets PINNED to this carrier thread
+│     (carrier thread can't be reassigned!)
+│
+├─ Virtual Thread B tries to enter
+│  └─ VT B BLOCKS the entire carrier thread
+│     (even though VT B could run on a different carrier!)
+│
+└─ Result: Loss of scalability benefits
+```
+
+#### The Solution with Semaphore
+
+```
+Semaphore does NOT pin:
+
+Platform Thread 1 (carrier):
+├─ Virtual Thread A: semaphore.acquire()
+│  └─ VT A is NOT pinned!
+│     (can be unmounted if needed)
+│
+├─ Virtual Thread B: semaphore.acquire()
+│  └─ VT B BLOCKS but doesn't block carrier
+│     (carrier can run other VTs!)
+│
+Platform Thread 2 (carrier):
+├─ Virtual Thread C: semaphore.acquire()
+│  └─ Can run freely on this carrier
+│
+└─ Result: Full scalability maintained ✅
+```
+
+### Diagram: Pinning vs Non-Pinning
+
+```
+WITH synchronized (PINS - BAD):
+┌──────────────────────────────────┐
+│ Platform Thread (OS Resource)    │
+├──────────────────────────────────┤
+│ VT-A: [in synchronized block]    │
+│       └─ PINNED HERE! 📌         │
+│ VT-B: [waiting for lock]         │
+│       └─ Blocks entire PT        │
+│ VT-C: [queued]                   │
+│       └─ Must wait               │
+└──────────────────────────────────┘
+❌ Wasted capacity on Platform Thread
+
+WITH Semaphore (NO PINNING - GOOD):
+┌──────────────────────────────────┐
+│ Platform Thread 1                │
+├──────────────────────────────────┤
+│ VT-A: [acquired permit]          │
+│       └─ Not pinned, can unmount │
+│ VT-D: [acquired permit]          │
+│       └─ Running independently   │
+│ VT-G: [acquired permit]          │
+│       └─ Running independently   │
+└──────────────────────────────────┘
+✅ Full platform thread utilization
+
+┌──────────────────────────────────┐
+│ Platform Thread 2                │
+├──────────────────────────────────┤
+│ VT-B: [waiting for permit]       │
+│       └─ Not pinned              │
+│ VT-E: [running other task]       │
+│       └─ Different work          │
+│ VT-H: [running other task]       │
+│       └─ Different work          │
+└──────────────────────────────────┘
+✅ Full platform thread utilization
+```
+
+---
+
+## Semaphore State Transitions
+
+### State Diagram
+
+```
+START
+  │
+  ├─ new Semaphore(3) ─→ [Available: 3]
+  │
+  ├─ Thread-A.acquire() ─→ [Available: 2]
+  │                            │
+  │                   Thread-B.acquire()
+  │                            │
+  │                       [Available: 1]
+  │                            │
+  │                   Thread-C.acquire()
+  │                            │
+  │                       [Available: 0]
+  │                            │
+  │                   Thread-D.acquire()
+  │                            │
+  ├─────────────────── BLOCKED ─────────────
+  │                   (waiting queue)
+  │                            │
+  │                   Thread-A.release()
+  │                            │
+  │                       [Available: 1]
+  │                            │
+  │                   D wakes up and acquires
+  │                            │
+  │                       [Available: 0]
+  │                            │
+  ├─ Thread-B.release() ─→ [Available: 1]
+  ├─ Thread-C.release() ─→ [Available: 2]
+  ├─ Thread-D.release() ─→ [Available: 3]
+  │
+  END
+```
+
+---
+
+## Platform Threads vs Virtual Threads: When to Use Semaphore
+
+### With Platform Threads (Traditional Use Case)
+
+```java
+public class DatabaseConnectionPoolExample {
+    
+    // Database can only handle 10 concurrent connections
+    private static final Semaphore dbConnections = new Semaphore(10);
+    
+    // But we have a thread pool with 100 threads
+    private static final ExecutorService executor = 
+        Executors.newFixedThreadPool(100);
+    
+    public void executeQuery(String sql) {
+        executor.submit(() -> {
+            try {
+                dbConnections.acquire();  // Max 10 threads accessing DB
+                try {
+                    // Only 10 threads can be here at once
+                    // Even though we have 100 threads total
+                    executeAgainstDatabase(sql);
+                } finally {
+                    dbConnections.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+}
+```
+
+**Timeline:**
+```
+Time →
+
+100 threads available
+    │
+    ├─ Threads 1-10: acquire permit, query DB
+    ├─ Threads 11-100: WAIT (no permits)
+    │
+    ├─ (1 second later)
+    │
+    ├─ Thread 1 finishes: release
+    ├─ Thread 11 acquires permit, queries DB
+    │
+    └─ (cycle continues)
+```
+
+### With Virtual Threads (New Capability)
+
+```java
+public class VirtualThreadWithSemaphoreExample {
+    
+    // External API rate limit: max 5 concurrent calls
+    private static final Semaphore apiRateLimit = new Semaphore(5);
+    
+    // Virtual thread per task - can handle thousands!
+    private static final ExecutorService executor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    public void callExternalAPI(Request request) {
+        executor.submit(() -> {
+            try {
+                apiRateLimit.acquire();  // Respect rate limit
+                try {
+                    // Only 5 VTs calling API at once
+                    // But we could have 10,000 VTs total!
+                    response = callAPI(request);
+                } finally {
+                    apiRateLimit.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+}
+```
+
+**Advantage:**
+```
+With Platform Threads: 
+  Max 200 concurrent tasks (thread pool size)
+  
+With Virtual Threads:
+  Can handle 10,000+ concurrent tasks
+  Respects API limit of 5 concurrent calls
+  No pinning, full scalability
+```
+
+---
+
+## Semaphore API Reference
+
+### Basic API
+
+```java
+// Create semaphore with N permits
+Semaphore sem = new Semaphore(3);
+
+// Acquire 1 permit (blocks if unavailable)
+sem.acquire();
+
+// Acquire N permits (blocks if unavailable)
+sem.acquire(2);
+
+// Release 1 permit
+sem.release();
+
+// Release N permits
+sem.release(3);
+
+// Try to acquire without blocking
+boolean acquired = sem.tryAcquire();        // Try 1 permit
+boolean acquired = sem.tryAcquire(2);       // Try 2 permits
+
+// Try to acquire with timeout
+boolean acquired = sem.tryAcquire(1, TimeUnit.SECONDS);
+boolean acquired = sem.tryAcquire(2, 5, TimeUnit.SECONDS);
+
+// Get available permit count
+int available = sem.availablePermits();
+
+// Get queued threads count
+int waiting = sem.getQueueLength();
+```
+
+### Fair Semaphore (FIFO Order)
+
+```java
+// Regular semaphore (no order guarantee)
+Semaphore unfair = new Semaphore(3);
+
+// Fair semaphore (FIFO - first come, first served)
+Semaphore fair = new Semaphore(3, true);
+
+// Fair guarantees:
+// ├─ If Thread A waits before Thread B
+// ├─ Then Thread A gets permit before Thread B
+// └─ Prevents thread starvation
+```
+
+---
+
+## Complete Example: Multi-Service Rate Limiting
+
+```java
+public class MultiServiceRateLimiter {
+    
+    // Different services have different rate limits
+    private static final Semaphore userServiceLimit = new Semaphore(5);
+    private static final Semaphore orderServiceLimit = new Semaphore(3);
+    private static final Semaphore paymentServiceLimit = new Semaphore(2);
+    
+    private static final ExecutorService executor = 
+        Executors.newVirtualThreadPerTaskExecutor();
+    
+    // Get user (max 5 concurrent)
+    public void getUser(int userId, Consumer<User> callback) {
+        executor.submit(() -> {
+            try {
+                userServiceLimit.acquire();
+                try {
+                    User user = userService.fetch(userId);
+                    callback.accept(user);
+                } finally {
+                    userServiceLimit.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+    
+    // Get order (max 3 concurrent)
+    public void getOrder(int orderId, Consumer<Order> callback) {
+        executor.submit(() -> {
+            try {
+                orderServiceLimit.acquire();
+                try {
+                    Order order = orderService.fetch(orderId);
+                    callback.accept(order);
+                } finally {
+                    orderServiceLimit.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+    
+    // Process payment (max 2 concurrent - expensive!)
+    public void processPayment(Payment payment, Consumer<Receipt> callback) {
+        executor.submit(() -> {
+            try {
+                paymentServiceLimit.acquire();
+                try {
+                    Receipt receipt = paymentService.process(payment);
+                    callback.accept(receipt);
+                } finally {
+                    paymentServiceLimit.release();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+    }
+}
+```
+
+### Timeline Visualization
+
+```
+User Service (limit: 5)
+├─ VT-1: [acquire] ─ 4 left
+├─ VT-2: [acquire] ─ 3 left
+├─ VT-3: [acquire] ─ 2 left
+├─ VT-4: [acquire] ─ 1 left
+├─ VT-5: [acquire] ─ 0 left
+├─ VT-6: [BLOCK] (waiting)
+└─ VT-7: [BLOCK] (waiting)
+
+Order Service (limit: 3)
+├─ VT-8: [acquire] ─ 2 left
+├─ VT-9: [acquire] ─ 1 left
+├─ VT-10: [acquire] ─ 0 left
+├─ VT-11: [BLOCK] (waiting)
+└─ VT-12: [BLOCK] (waiting)
+
+Payment Service (limit: 2)
+├─ VT-13: [acquire] ─ 1 left
+├─ VT-14: [acquire] ─ 0 left
+├─ VT-15: [BLOCK] (waiting)
+├─ VT-16: [BLOCK] (waiting)
+└─ VT-17: [BLOCK] (waiting)
+```
+
+---
+
+## Semaphore vs Other Synchronization Tools
+
+### Comparison Table
+
+| Tool | Purpose | Key Feature | Best For |
+|------|---------|------------|----------|
+| **synchronized** | Mutual exclusion | Simple, keyword-based | Simple critical sections |
+| **ReentrantLock** | Mutual exclusion | More flexible than synchronized | Exclusive access |
+| **Semaphore** | Shared resource limiting | Multiple permits | Rate limiting, resource pooling |
+| **CountDownLatch** | Wait for N tasks | One-time synchronization | Waiting for multiple tasks |
+| **CyclicBarrier** | Synchronization point | Reusable barrier | Synchronizing thread batches |
+
+### Decision Tree
+
+```
+Do you need to:
+
+├─ Limit concurrent access to N resources?
+│  └─ Use Semaphore(N)
+│
+├─ Ensure only 1 thread executes critical section?
+│  └─ Use synchronized or ReentrantLock
+│
+├─ Wait for multiple tasks to complete?
+│  └─ Use CountDownLatch or CompletableFuture
+│
+├─ Synchronize N threads at a barrier point?
+│  └─ Use CyclicBarrier
+│
+└─ Rate limit virtual thread execution?
+   └─ Use Semaphore (preferred over Lock!)
+```
+
+---
+
+## Best Practices
+
+### ✅ DO: Use Try-Finally with Semaphore
+
+```java
+try {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();  // Always release!
+    }
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();
+}
+```
+
+### ✅ DO: Use Fair Semaphore for Critical Resources
+
+```java
+// Prevents thread starvation
+Semaphore fair = new Semaphore(3, true);
+```
+
+### ✅ DO: Use Semaphore Instead of Lock with Virtual Threads
+
+```java
+// With VT, prefer Semaphore to avoid pinning
+Semaphore semaphore = new Semaphore(1);  // Acts like a lock, but non-pinning
+```
+
+### ❌ DON'T: Forget to Handle InterruptedException
+
+```java
+// WRONG - ignores interruption
+semaphore.acquire();
+doWork();
+semaphore.release();
+
+// RIGHT - respects interruption
+try {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();
+    }
+} catch (InterruptedException e) {
+    Thread.currentThread().interrupt();
+    throw new RuntimeException(e);
+}
+```
+
+### ❌ DON'T: Use Semaphore When You Mean Lock
+
+```java
+// WRONG - using Semaphore(1) as a lock
+Semaphore sem = new Semaphore(1);
+sem.acquire();
+doExclusiveWork();
+// Any thread can release! (wrong semantics)
+
+// RIGHT - use ReentrantLock for exclusive access
+ReentrantLock lock = new ReentrantLock();
+lock.lock();
+try {
+    doExclusiveWork();
+} finally {
+    lock.unlock();  // Only this thread can call this
+}
+```
+
+---
+
+## Key Takeaways
+
+1. **Semaphore = Permit System** - Controls shared resource access through permits
+
+2. **Not Just for Rate Limiting** - Can acquire/release multiple permits for flexible access patterns
+
+3. **Any Thread Can Release** - Unlike locks, enables deferred release patterns
+
+4. **Virtual Thread Friendly** - Doesn't pin threads, maintains scalability
+
+5. **Platform Thread Compatible** - Works great with platform threads too (resource pooling)
+
+6. **Always Use Try-Finally** - Ensures permits are released even on exception
+
+7. **Fair vs Unfair** - Use fair semaphores to prevent thread starvation
+
+8. **Better Than Lock for VT** - Prefer Semaphore over synchronized/ReentrantLock with virtual threads to avoid pinning
+
+---
+
+## Quick Reference
+
+### Simple Rate Limiting (Most Common)
+
+```java
+Semaphore limit = new Semaphore(3);
+
+executor.submit(() -> {
+    limit.acquire();
+    try {
+        apiCall();
+    } finally {
+        limit.release();
+    }
+});
+```
+
+### Exclusive Access (Like a Lock)
+
+```java
+Semaphore exclusive = new Semaphore(1);
+// Acts like a lock, but non-pinning with VT
+```
+
+### Acquire Multiple Permits
+
+```java
+Semaphore sem = new Semaphore(10);
+sem.acquire(5);  // Take 5 permits at once
+try {
+    heavyWork();
+} finally {
+    sem.release(5);  // Release all 5
+}
+```
+
+### Fair FIFO Order
+
+```java
+Semaphore fair = new Semaphore(3, true);
+// FIFO order: first waiter gets first permit
+```
+
+---
+
+## Historical Context
+
+- **Introduced:** Java 5 (same as ExecutorService, CountDownLatch, CyclicBarrier)
+- **Not New Technology** - Well-tested, production-proven for 15+ years
+- **Renewed Interest** - Virtual threads make them the preferred synchronization tool for I/O-heavy workloads
+- **Future-Proof** - Works with platform threads AND virtual threads
+
+---
+
+## Further Reading
+
+- [Java Semaphore Documentation](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Semaphore.html)
+- [Virtual Threads and Thread Pinning](https://wiki.openjdk.org/display/loom/Pinning)
+- [Java Concurrency in Practice - Chapter 5](https://jcip.net/)
+- [Semaphore vs Lock](https://en.wikipedia.org/wiki/Semaphore_%28programming%29)
+
+---
+
+**Remember:** Semaphores are not new, but virtual threads finally make them the ideal choice for rate-limiting and resource pooling in Java! 🔐✨
