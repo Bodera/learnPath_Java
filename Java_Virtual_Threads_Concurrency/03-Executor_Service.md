@@ -2558,3 +2558,699 @@ public UserProfile getUserProfile(String userId) throws ExecutionException, Inte
 
 **Remember:** Virtual threads make concurrency easier, but they don't make parallelization logic disappear. Always submit independent tasks eagerly! 🚀
 
+---
+
+# 🧹 AutoCloseable & ExecutorService Lifecycle: Virtual Threads vs Platform Threads
+
+## TL;DR
+
+**Platform Threads:** Require explicit `shutdownNow()` or the app keeps running (busy threads block exit)  
+**Virtual Threads:** Don't require shutdown in many cases (they're lightweight and the main thread's blocking calls naturally halt the app)
+
+```java
+// ❌ WITHOUT try-with-resources (manual cleanup)
+var executor = Executors.newSingleThreadExecutor();
+executor.submit(() -> doWork());
+executor.shutdownNow();  // ← Must do this manually
+
+// ✅ WITH try-with-resources (automatic cleanup)
+try (var executor = Executors.newSingleThreadExecutor()) {
+    executor.submit(() -> doWork());
+}  // ← Automatically calls shutdown()
+```
+
+---
+
+## The Problem: Why Do We Need Shutdown?
+
+### What Happens Without Shutdown?
+
+When you submit tasks to an `ExecutorService`, you're creating **background threads**. These threads can prevent your application from exiting!
+
+```java
+public static void withoutAutoCloseable() {
+    var executorService = Executors.newSingleThreadExecutor();
+    executorService.submit(Lec01AutoCloseable::task);
+    LOGGER.info("submitted");
+    // ❌ Application does NOT exit here!
+    // The executor thread is still running in the background
+}
+
+// Main thread reaches the end of main()
+// But the executor thread is still alive
+// → Application hangs indefinitely
+```
+
+### Why Threads Block Application Exit
+
+In Java, an application exits when:
+
+```
+All non-daemon threads have finished
+```
+
+If you have a thread pool with active threads:
+```
+main() {
+    executor = new ThreadPool()
+    executor.submit(task)  // Creates a NON-DAEMON thread
+    println("done")       
+}  // ← Main thread finishes here
+
+// But executor thread is still running!
+// Application waits for it to finish
+// → Application never exits
+```
+
+### Visualization
+
+```
+Main Thread:  [main] → submit() → println("done") → END
+                                        ↓
+Executor Thread: ────[execute task]─────────→ (still running!)
+                                        ↓
+Application Status: ⏸️  WAITING (won't exit)
+```
+
+---
+
+## The Solution: AutoCloseable & Try-With-Resources
+
+### Understanding AutoCloseable
+
+The `ExecutorService` interface extends `AutoCloseable`:
+
+```java
+public interface ExecutorService extends Executor, AutoCloseable {
+    // ... other methods
+    
+    @Override
+    void close();  // ← Closes resources
+}
+```
+
+### The Try-With-Resources Pattern
+
+Java provides automatic resource management:
+
+```java
+try (var executorService = Executors.newSingleThreadExecutor()) {
+    executorService.submit(Lec01AutoCloseable::task);
+    executorService.submit(Lec01AutoCloseable::task);
+    executorService.submit(Lec01AutoCloseable::task);
+    LOGGER.info("submitted");
+}  // ← Automatically calls executorService.close()
+```
+
+### What Happens
+
+```
+Step 1: Enter try block
+    └─ Create executor
+    └─ Submit tasks
+
+Step 2: Exit try block (explicitly or via exception)
+    └─ Automatically call close()
+    └─ Which calls shutdown() internally
+    └─ Waits for all tasks to complete
+    └─ Terminates threads
+
+Step 3: Application can now exit
+```
+
+### How `close()` Works for ExecutorService
+
+```java
+// Internally, ExecutorService.close() does something like:
+public void close() {
+    shutdown();  // Stop accepting new tasks
+    try {
+        if (!awaitTermination(long timeout, TimeUnit unit)) {
+            shutdownNow();  // Force stop if timeout
+        }
+    } catch (InterruptedException e) {
+        shutdownNow();
+        Thread.currentThread().interrupt();
+    }
+}
+```
+
+---
+
+## Comparison: With vs Without AutoCloseable
+
+### Without AutoCloseable ❌
+
+```java
+public static void withoutAutoCloseable() {
+    var executorService = Executors.newSingleThreadExecutor();
+    executorService.submit(Lec01AutoCloseable::task);
+    LOGGER.info("submitted");
+    // ❌ Forgot to shutdown!
+}
+
+// Timeline:
+// 0ms:  Task submitted
+// 1ms:  "submitted" logged
+// 3ms:  Main method returns
+// 4ms:  Main thread finishes
+// ⏸️   Application HANGS - executor thread still running!
+// Eventually: Timeout or manual kill
+```
+
+### With AutoCloseable ✅
+
+```java
+public static void withAutoCloseable() {
+    try (var executorService = Executors.newSingleThreadExecutor()) {
+        executorService.submit(Lec01AutoCloseable::task);
+        executorService.submit(Lec01AutoCloseable::task);
+        executorService.submit(Lec01AutoCloseable::task);
+        LOGGER.info("submitted");
+    }  // ← Auto shutdown happens here
+}
+
+// Timeline:
+// 0ms:  All tasks submitted
+// 1ms:  "submitted" logged
+// 3ms:  Exit try block
+// 4ms:  close() called automatically
+// 5ms:  shutdown() waits for tasks
+// 1005ms: All tasks complete
+// 1006ms: shutdown() returns
+// 1007ms: Main thread finishes
+// ✅    Application exits cleanly
+```
+
+---
+
+## The Key Difference: Platform Threads vs Virtual Threads
+
+### Platform Threads (Heavy & Expensive)
+
+Platform threads are **daemon-aware** but default to **non-daemon**:
+
+```java
+public class ExecutorThread {
+    public ExecutorThread() {
+        Thread t = new Thread(...);
+        t.setDaemon(false);  // ← Non-daemon by default!
+    }
+}
+
+// Non-daemon threads prevent JVM exit
+```
+
+#### Without Shutdown: Application Hangs
+
+```
+Main thread:    [code] → [end]
+                          ↓
+Platform thread: [work................................] (still going!)
+                          ↓
+JVM Status: ⏸️ WAITING FOR NON-DAEMON THREADS
+```
+
+#### With Shutdown: Application Exits
+
+```
+Main thread:    [code] → [shutdown()] → [end]
+                          ↓
+Platform thread: [work] → [interrupted] → [stopped]
+                          ↓
+JVM Status: ✅ ALL THREADS DONE - EXIT
+```
+
+---
+
+### Virtual Threads (Lightweight & Daemon-Like)
+
+Virtual threads behave **more like daemon threads** in practice:
+
+```
+Main thread:    [code] → [blocking I/O] → [end]
+                          ↓
+Virtual threads: [work] → [parked] → [resumed]
+                          ↓
+JVM Status: ✅ MAIN THREAD BLOCKED (not waiting for VTs)
+```
+
+**Key insight:** Since the main thread is **blocking on `future.get()`**, the JVM waits for that to complete. Once the main thread's `future.get()` returns, it can exit.
+
+---
+
+## Real-World Example: The AggregatorDemo
+
+### The Code
+
+```java
+static void main(String[] args) throws InterruptedException, ExecutionException {
+    var executor = Executors.newVirtualThreadPerTaskExecutor();
+    var aggregator = new AggregatorService(executor);
+
+    LOGGER.info("product-42: {}", aggregator.getProduct(42));
+
+    var futures = IntStream.rangeClosed(1, 50)
+            .mapToObj(id -> executor.submit(() -> aggregator.getProduct(id)))
+            .toList();
+
+    List<ProductDto> products = futures.stream()
+        .map(Lec04AggregatorDemo::toProductDto)
+        .toList();
+    
+    LOGGER.info("list: {}", products);
+    // ✅ Application exits here (NO shutdown needed!)
+}
+```
+
+### Why It Works Without Shutdown
+
+```
+Execution Timeline:
+
+1. Submit task for product-42
+2. Wait for result (future.get() - blocking!)
+3. Submit 50 more tasks
+4. Store futures in list
+5. Process futures with toProductDto()
+   └─ For each future:
+      └─ Call future.get() - BLOCKING WAIT
+      └─ Virtual thread yields, main thread blocks
+      └─ Virtual thread completes
+      └─ Main thread resumes with result
+6. Log results
+7. Main method ends
+   └─ Main thread finishes
+   └─ All virtual threads already finished (via future.get())
+   └─ ✅ JVM can exit (no non-daemon threads left)
+```
+
+### Visual Timeline
+
+```
+Thread 1 (Main):
+  ├─ aggregator.getProduct(42)
+  │  └─ future.get() ┐
+  │                  ├─ [BLOCKING WAIT]
+  │                  │  (while VT1 runs)
+  │                  └─ ✅ Result returned
+  │
+  ├─ Create futures for 50 products
+  │
+  └─ futures.stream().map(toProductDto)
+     │
+     ├─ future.get() ┐
+     │               ├─ [BLOCKING WAIT]
+     │               │  (while VT2-51 run)
+     │               └─ ✅ Result returned
+     │
+     └─ ... repeat for all 50
+
+Virtual Threads 1-51:
+  ├─ VT1: [execute getProduct(42)]
+  ├─ VT2: [execute getProduct(1)]
+  ├─ VT3: [execute getProduct(2)]
+  └─ ... VT51: [execute getProduct(50)]
+
+Final: All VTs complete → Main thread continues → Exits cleanly ✅
+```
+
+### Why This Works With Virtual Threads
+
+1. **No daemon/non-daemon distinction matters** - VTs are lightweight
+2. **Main thread blocks** on `future.get()` explicitly
+3. **By the time main thread finishes**, all VTs have already completed
+4. **No background threads left** to block the exit
+
+---
+
+## Contrast: If We Used Platform Threads
+
+```java
+static void main(String[] args) {
+    var executor = Executors.newFixedThreadPool(10);  // ← Platform threads
+    
+    var futures = IntStream.rangeClosed(1, 50)
+            .mapToObj(id -> executor.submit(() -> aggregator.getProduct(id)))
+            .toList();
+
+    List<ProductDto> products = futures.stream()
+        .map(Lec04AggregatorDemo::toProductDto)
+        .toList();
+    
+    LOGGER.info("list: {}", products);
+    
+    // ❌ DANGER: Without shutdown, application hangs!
+    // The 10 platform threads are still alive
+    // JVM won't exit until executor.shutdownNow() is called
+    
+    // ✅ Must do this:
+    executor.shutdown();  // or shutdownNow()
+}
+```
+
+---
+
+## When Do You Need Shutdown?
+
+### Short-Lived Applications (One-Off Tasks)
+
+```
+Apps that:
+├─ Start
+├─ Do work
+└─ Exit immediately
+
+❌ WITHOUT shutdown: Application hangs
+✅ WITH shutdown: Cleans up properly
+
+Example: CLI tools, batch jobs, scripts
+```
+
+### Long-Running Applications (Servers)
+
+```
+Apps that:
+├─ Start (e.g., Spring Boot web server)
+├─ Accept requests indefinitely
+└─ Graceful shutdown on signal (Ctrl+C)
+
+ℹ️  Usually the framework handles shutdown
+   (Spring manages ExecutorService lifecycle)
+
+Example: REST APIs, web servers, microservices
+```
+
+### Virtual Threads Special Case
+
+```
+Because virtual threads are lightweight:
+
+✅ Try-with-resources still recommended
+   (explicit resource management)
+   
+❌ But if you forget, it might not hang
+   (because of how main thread blocks on future.get())
+   
+⚠️  STILL: Don't rely on this!
+   Always use try-with-resources for clarity
+```
+
+---
+
+## Best Practices
+
+### ✅ ALWAYS Use Try-With-Resources
+
+```java
+public static void bestPractice() {
+    try (var executorService = Executors.newVirtualThreadPerTaskExecutor()) {
+        var future = executorService.submit(() -> doWork());
+        var result = future.get();
+        System.out.println(result);
+    }  // ← Automatically shutdown
+}
+```
+
+**Benefits:**
+- Explicit resource cleanup
+- Works whether you forget or not
+- Clear intent (resource used in this block)
+- Exception-safe (cleanup even if exception occurs)
+- Readable and maintainable
+
+### ✅ Use Try-With-Resources + Proper Timeout
+
+```java
+public static void withTimeout() {
+    try (var executorService = Executors.newVirtualThreadPerTaskExecutor()) {
+        var future = executorService.submit(() -> doWork());
+        var result = future.get(5, TimeUnit.SECONDS);  // ← Timeout!
+        System.out.println(result);
+    } catch (TimeoutException e) {
+        LOGGER.error("Task took too long!");
+    }
+}
+```
+
+### ✅ Spring Boot Example (Framework Manages It)
+
+```java
+@Configuration
+public class ExecutorConfig {
+    
+    @Bean
+    public ExecutorService executorService() {
+        // Spring will call close() on shutdown
+        return Executors.newVirtualThreadPerTaskExecutor();
+    }
+}
+
+@Service
+public class MyService {
+    private final ExecutorService executor;
+    
+    public MyService(ExecutorService executor) {
+        this.executor = executor;  // ← Injected, managed by Spring
+    }
+    
+    public void doWork() {
+        executor.submit(() -> heavyWork());
+        // No manual shutdown needed (Spring handles it)
+    }
+}
+```
+
+---
+
+## Common Mistakes
+
+### ❌ Mistake 1: Forgetting Shutdown (Platform Threads)
+
+```java
+public static void bad() {
+    var executor = Executors.newFixedThreadPool(10);
+    executor.submit(() -> doWork());
+    LOGGER.info("submitted");
+    // ❌ No shutdown! Application hangs
+}
+```
+
+**Fix:**
+```java
+public static void good() {
+    try (var executor = Executors.newFixedThreadPool(10)) {
+        executor.submit(() -> doWork());
+        LOGGER.info("submitted");
+    }  // ✅ Auto shutdown
+}
+```
+
+### ❌ Mistake 2: Shutdown Waits Forever
+
+```java
+public static void problematic() {
+    var executor = Executors.newFixedThreadPool(10);
+    executor.submit(() -> {
+        while (true) {  // ← Infinite loop!
+            doWork();
+        }
+    });
+    executor.shutdown();
+    executor.awaitTermination(5, TimeUnit.SECONDS);
+    // ⏱️ Waits 5 seconds, then times out
+}
+```
+
+**Fix:**
+```java
+public static void better() {
+    try (var executor = Executors.newFixedThreadPool(10)) {
+        executor.submit(this::finiteTask);
+        // Task completes normally
+    }  // ✅ Shutdown works immediately
+}
+
+private void finiteTask() {
+    // Do work and return (not infinite)
+}
+```
+
+### ❌ Mistake 3: Creating Executor in Loop
+
+```java
+public static void terrible() {
+    for (int i = 0; i < 100; i++) {
+        var executor = Executors.newFixedThreadPool(10);
+        executor.submit(() -> doWork());
+        // ❌ Forgot to shutdown! 100 executors × 10 threads = 1000 threads!
+        // Application definitely hangs
+    }
+}
+```
+
+**Fix:**
+```java
+public static void good() {
+    try (var executor = Executors.newFixedThreadPool(10)) {
+        for (int i = 0; i < 100; i++) {
+            executor.submit(() -> doWork());
+        }
+    }  // ✅ One executor, reused 100 times, properly shutdown
+}
+```
+
+---
+
+## Understanding the AggregatorDemo More Deeply
+
+### Why Blocking `.get()` is Key
+
+```java
+// This is the crucial part:
+List<ProductDto> products = futures.stream()
+    .map(future -> future.get())  // ← BLOCKING WAIT
+    .toList();
+
+// What happens:
+// 1. Main thread calls future.get()
+// 2. Main thread BLOCKS waiting for virtual thread to complete
+// 3. Virtual thread executes the task
+// 4. Virtual thread completes
+// 5. Main thread UNBLOCKS and continues
+// 6. Main thread processes next future
+
+// Because main thread is BLOCKED:
+// - JVM won't exit until main finishes
+// - All virtual threads complete before main finishes
+// - No need for explicit shutdown
+```
+
+### The flow
+
+```
+Main Thread Timeline:
+
+Start
+├─ Submit VT1, VT2, VT3, ..., VT50
+├─ Store futures in list
+├─ futures.stream().map(f -> f.get())
+│  ├─ VT1: future.get() → [BLOCK] ← Main thread waits
+│  │         ...VT1 executes...
+│  │         ✅ VT1 done
+│  │  → [UNBLOCK] Continue with next
+│  ├─ VT2: future.get() → [BLOCK]
+│  │         ...VT2 executes...
+│  │         ✅ VT2 done
+│  │  → [UNBLOCK] Continue with next
+│  └─ ... repeat for all 50 VTs
+├─ Log results
+└─ End of main() → Exit cleanly ✅
+```
+
+### If We Didn't Block (Different Scenario)
+
+```java
+// Hypothetical scenario without blocking:
+var futures = IntStream.rangeClosed(1, 50)
+    .mapToObj(id -> executor.submit(() -> aggregator.getProduct(id)))
+    .toList();
+
+LOGGER.info("submitted 50 tasks");
+// ❌ Don't call future.get() here!
+// ❌ Just log and return
+
+// What happens:
+// Main thread: 0ms - submit tasks
+// Main thread: 1ms - log
+// Main thread: 2ms - END (main method returns)
+// Virtual threads: still running in background
+// ⏸️ JVM behavior: ???
+//    (VTs might be daemon-like, might not)
+//    (Unpredictable - AVOID THIS!)
+```
+
+---
+
+## Summary Table
+
+| Aspect | Platform Threads | Virtual Threads |
+|--------|-----------------|-----------------|
+| **Thread Weight** | Heavy (1-2 MB stack) | Light (~KB) |
+| **Shutdown Required** | ✅ YES (else hangs) | ℹ️ RECOMMENDED (for clarity) |
+| **Without Shutdown** | ❌ App hangs | ⚠️ Might work (but unclear) |
+| **Blocking get()** | Blocks main thread | Blocks main thread |
+| **Best Practice** | Always use try-with-resources | Always use try-with-resources |
+| **Complexity** | Pool management needed | Can be more casual |
+| **Memory Footprint** | High | Low |
+
+---
+
+## Key Takeaways
+
+1. **AutoCloseable + Try-With-Resources = Automatic Cleanup**
+   - No manual shutdown calls
+   - Exception-safe
+   - Clear code intent
+
+2. **Platform Threads Hang Without Shutdown**
+   - Non-daemon by default
+   - Keep JVM alive
+   - Will cause application to hang indefinitely
+
+3. **Virtual Threads Are Lighter**
+   - But still need cleanup (for resource management)
+   - Main thread blocking on `future.get()` naturally ensures proper exit
+   - Don't rely on this behavior - be explicit!
+
+4. **Best Practice: Always Use Try-With-Resources**
+   ```java
+   try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+       // Use executor
+   }  // Auto cleanup
+   ```
+
+5. **For Long-Running Apps**
+   - Frameworks (Spring, Jakarta) handle shutdown gracefully
+   - Don't need to worry about manual cleanup
+
+6. **For Short-Lived Apps**
+   - Use try-with-resources
+   - Ensures clean exit
+   - No hanging processes
+
+---
+
+## Visual Cheat Sheet
+
+### When to Shutdown?
+
+```
+✅ ALWAYS:
+  └─ Explicitly managed executor in your code
+     try (var executor = ...) { ... }
+
+ℹ️ SOMETIMES:
+  └─ Framework-managed (Spring handles it)
+
+❌ NEVER:
+  └─ Rely on implicit behavior or hope
+```
+
+### The Rule
+
+```
+Create Executor
+    ↓
+Use Try-With-Resources
+    ↓
+Auto Shutdown Happens
+    ↓
+Resources Cleaned Up
+    ↓
+Application Exits Cleanly ✅
+```
+
+---
+
+**Remember:** Virtual threads make concurrency easier, but resource management is still important. Use try-with-resources and let Java do the cleanup automatically! 🧹✨

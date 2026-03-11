@@ -2341,6 +2341,23 @@ A -
 2 | 5
 ```
 
+Q - Which output is more likely?
+```java
+1  | public class Quiz {
+2  |   
+3  |   public static void main(String[] args) { 
+4  |      var thread = Thread.ofVirtual().start(() -> {
+5  |         for (int i = 0; i < 3; i++) {
+6  |            log.info("{}", Thread.currentThread());
+7  |         }
+8  |      });
+9  |      thread.join();
+10 |   }  
+11 | }
+```
+
+A- Same virtual thread and platform thread printed 3 times.
+
 ## Summary
 
 - A process is a unit of resources that contains at least one thread, which is a unit of execution.
