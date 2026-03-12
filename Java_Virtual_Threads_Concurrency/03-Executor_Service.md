@@ -6644,3 +6644,982 @@ Semaphore fair = new Semaphore(3, true);
 ---
 
 **Remember:** Semaphores are not new, but virtual threads finally make them the ideal choice for rate-limiting and resource pooling in Java! 🔐✨
+
+---
+
+# 🎁 ConcurrencyLimiter: Building a Reusable Wrapper
+
+## TL;DR
+
+**ConcurrencyLimiter** is a wrapper around `ExecutorService` that automatically applies semaphore-based concurrency limiting to every submitted task.
+
+```java
+// Without wrapper: Manual semaphore management in every task
+executor.submit(() -> {
+    semaphore.acquire();
+    try {
+        doWork();
+    } finally {
+        semaphore.release();
+    }
+});
+
+// With wrapper: Clean, reusable abstraction
+var limiter = new ConcurrencyLimiter(executor, 3);
+limiter.submit(() -> doWork());  // Concurrency limit applied automatically!
+```
+
+---
+
+## The Problem: Repetitive Semaphore Code
+
+### Without a Wrapper
+
+```java
+Semaphore semaphore = new Semaphore(3);
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+// Every single task submission looks like this:
+executor.submit(() -> {
+    try {
+        semaphore.acquire();
+        try {
+            task1();
+        } finally {
+            semaphore.release();
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+});
+
+executor.submit(() -> {
+    try {
+        semaphore.acquire();
+        try {
+            task2();
+        } finally {
+            semaphore.release();
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+});
+
+executor.submit(() -> {
+    try {
+        semaphore.acquire();
+        try {
+            task3();
+        } finally {
+            semaphore.release();
+        }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    }
+});
+
+// ... repeat for all 20 tasks 😫
+```
+
+**Problems:**
+- ❌ Boilerplate code repeated everywhere
+- ❌ Easy to make mistakes (forget try-finally, semaphore.release())
+- ❌ Hard to maintain (change limit? update everywhere!)
+- ❌ Unclear intent (semaphore logic buries the actual work)
+
+### With a Wrapper (Clean!)
+
+```java
+var limiter = new ConcurrencyLimiter(executor, 3);
+
+limiter.submit(() -> task1());
+limiter.submit(() -> task2());
+limiter.submit(() -> task3());
+// ... repeat for all 20 tasks
+
+// Clean, simple, intent is clear!
+```
+
+---
+
+## The ConcurrencyLimiter Class
+
+### Complete Implementation
+
+```java
+public class ConcurrencyLimiter implements AutoCloseable {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(
+        ConcurrencyLimiter.class
+    );
+
+    private final ExecutorService executor;
+    private final Semaphore semaphore;
+
+    // Constructor: Initialize with executor and concurrency limit
+    public ConcurrencyLimiter(ExecutorService executor, int limit) {
+        this.executor = executor;
+        this.semaphore = new Semaphore(limit);
+    }
+
+    // Public API: Submit a callable task (returns Future)
+    public <T> Future<T> submit(Callable<T> callable) {
+        return executor.submit(() -> wrapCallable(callable));
+    }
+
+    // Private helper: Wrap callable with semaphore logic
+    private <T> T wrapCallable(Callable<T> callable) {
+        try {
+            semaphore.acquire();           // Get permission
+            return callable.call();         // Execute task
+        } catch (Exception e) {
+            LOGGER.error("Exception in callable", e);
+            throw new RuntimeException(e);  // Propagate error
+        } finally {
+            semaphore.release();            // Always release
+        }
+    }
+
+    // AutoCloseable: Clean shutdown
+    @Override
+    public void close() {
+        this.executor.close();
+    }
+}
+```
+
+### What Each Part Does
+
+```
+ConcurrencyLimiter
+├─ executor: The underlying ExecutorService (VT or Platform threads)
+├─ semaphore: Controls concurrency (e.g., max 3 tasks)
+│
+├─ Constructor(executor, limit)
+│  └─ Sets up the semaphore with N permits
+│
+├─ submit(callable)
+│  └─ Public API - user-facing method
+│     └─ Wraps the callable with semaphore logic
+│        └─ Delegates to executor
+│
+├─ wrapCallable(callable)
+│  └─ Private helper - does the actual wrapping
+│     ├─ acquire() - wait for permission
+│     ├─ call() - execute the task
+│     ├─ catch - log errors
+│     └─ finally - always release
+│
+└─ close()
+   └─ Shutdown the executor (AutoCloseable)
+```
+
+---
+
+## Design Pattern: Decorator Pattern
+
+### What is the Decorator Pattern?
+
+The **Decorator Pattern** wraps an object to add behavior without modifying the original.
+
+```
+Before (without decoration):
+┌──────────────────┐
+│  ExecutorService │
+└──────────────────┘
+
+After (with decoration):
+┌────────────────────────────┐
+│   ConcurrencyLimiter       │
+│  ┌──────────────────────┐  │
+│  │ ExecutorService      │  │
+│  └──────────────────────┘  │
+│  + Adds semaphore logic    │
+└────────────────────────────┘
+```
+
+### Flow Diagram
+
+```
+User Code:
+  limiter.submit(callable)
+           ↓
+ConcurrencyLimiter:
+  ├─ Wraps callable with semaphore
+  │  ├─ semaphore.acquire()
+  │  ├─ callable.call()
+  │  └─ semaphore.release()
+  │
+  └─ executor.submit(wrappedCallable)
+           ↓
+ExecutorService (VT or PT):
+  ├─ Creates thread/VT
+  └─ Executes wrappedCallable
+           ↓
+Task Execution:
+  ├─ Waits for semaphore permit (max 3 concurrent)
+  ├─ Executes actual work
+  └─ Releases permit
+```
+
+---
+
+## Step-by-Step: How It Works
+
+### Step 1: User Submits Task
+
+```java
+var limiter = new ConcurrencyLimiter(executor, 3);
+limiter.submit(() -> Client.getProduct(1));
+```
+
+### Step 2: ConcurrencyLimiter.submit() is Called
+
+```java
+public <T> Future<T> submit(Callable<T> callable) {
+    // callable = () -> Client.getProduct(1)
+    
+    return executor.submit(() -> wrapCallable(callable));
+    //                       ↑
+    //                   New callable that:
+    //                   1. Acquires semaphore
+    //                   2. Runs original callable
+    //                   3. Releases semaphore
+}
+```
+
+### Step 3: Executor Receives Wrapped Callable
+
+```
+Executor sees:
+() -> {
+    semaphore.acquire();
+    try {
+        callable.call();  // Client.getProduct(1)
+    } finally {
+        semaphore.release();
+    }
+}
+```
+
+### Step 4: Execution Timeline
+
+```
+Task 1 submitted: submit(() -> product(1))
+  └─ ConcurrencyLimiter.submit() called
+     └─ Executor.submit(wrapped) called
+        └─ Creates virtual thread
+           └─ VT starts execution
+              ├─ semaphore.acquire() → Success (permits: 2)
+              ├─ callable.call() → product(1) executes
+              ├─ (API call takes 1 second)
+              └─ (VT still holding semaphore)
+
+Task 2 submitted: submit(() -> product(2))
+  └─ Same flow
+     └─ VT-2: semaphore.acquire() → Success (permits: 1)
+
+Task 3 submitted: submit(() -> product(3))
+  └─ Same flow
+     └─ VT-3: semaphore.acquire() → Success (permits: 0)
+
+Task 4 submitted: submit(() -> product(4))
+  └─ ConcurrencyLimiter.submit() called
+     └─ Executor.submit(wrapped) called
+        └─ Creates virtual thread
+           └─ VT starts execution
+              ├─ semaphore.acquire() → BLOCKED! (no permits)
+              └─ (waits for one of the first 3 to release)
+
+(1 second passes)
+
+Task 1 finishes: product(1) returns
+  └─ VT-1: semaphore.release() → Permits: 1
+     └─ VT-4: semaphore.acquire() now succeeds!
+        └─ VT-4 can now execute product(4)
+```
+
+---
+
+## Usage: Before and After
+
+### Version 1: Without Wrapper ❌
+
+```java
+public class Lec05ConcurrencyLimitWithoutWrapper {
+
+    static void main() {
+        Semaphore semaphore = new Semaphore(3);
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        
+        try (executor) {
+            for (int i = 1; i <= 20; i++) {
+                int id = i;
+                executor.submit(() -> {
+                    try {
+                        semaphore.acquire();
+                        try {
+                            printProductInfo(id);
+                        } finally {
+                            semaphore.release();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+            }
+        }
+    }
+
+    private static void printProductInfo(int id) {
+        var product = Client.getProduct(id);
+        LOGGER.info("{} => {}", id, product);
+    }
+}
+```
+
+**Problems:**
+- ❌ Repetitive try-catch-finally for semaphore
+- ❌ Error handling mixed in
+- ❌ 15 lines per task submission
+- ❌ Easy to forget InterruptedException handling
+
+---
+
+### Version 2: With Wrapper ✅
+
+```java
+public class Lec06ConcurrencyLimitWithWrapper {
+
+    static void main() {
+        var executor = Executors.newVirtualThreadPerTaskExecutor();
+        var limiter = new ConcurrencyLimiter(executor, 3);
+        
+        try (limiter) {
+            for (int i = 1; i <= 20; i++) {
+                int id = i;
+                limiter.submit(() -> printProductInfo(id));
+            }
+            LOGGER.info("tasks submitted");
+        }
+    }
+
+    private static String printProductInfo(int id) {
+        var product = Client.getProduct(id);
+        LOGGER.info("{} => {}", id, product);
+        return product;
+    }
+}
+```
+
+**Benefits:**
+- ✅ Clean, readable code
+- ✅ Intent is clear (submit task with limit)
+- ✅ One line per task submission
+- ✅ Error handling hidden (but still works!)
+- ✅ Reusable across the codebase
+
+---
+
+## Output Comparison
+
+### Without Wrapper (Manual Semaphore)
+
+```
+00:26:05.677 [virtual-48] Calling product/10
+00:26:05.677 [virtual-49] Calling product/11
+00:26:05.677 [virtual-47] Calling product/9
+(3 concurrent calls as expected, but code was messy)
+```
+
+### With Wrapper (Clean!)
+
+```
+00:26:05.677 [bodera-virtual15] Calling product/15
+00:26:05.677 [bodera-virtual13] Calling product/13
+00:26:05.677 [bodera-virtual16] Calling product/16
+(Same behavior, but code is much cleaner!)
+```
+
+---
+
+## With Custom Thread Names
+
+### Code
+
+```java
+static void main() {
+    var factory = Thread.ofVirtual()
+        .name("bodera-virtual", 1)
+        .factory();
+    
+    var executor = Executors.newThreadPerTaskExecutor(factory);
+    var limiter = new ConcurrencyLimiter(executor, 3);
+    execute(limiter, 20);
+}
+```
+
+### Output
+
+```
+00:27:24.017 [bodera-virtual15] Calling product/15
+00:27:24.017 [bodera-virtual13] Calling product/13
+00:27:24.017 [bodera-virtual16] Calling product/16
+00:27:25.030 [bodera-virtual16] 16 => Durable Aluminum Car
+00:27:25.030 [bodera-virtual15] 15 => Small Aluminum Bag
+00:27:25.030 [bodera-virtual13] 13 => Enormous Bronze Bag
+00:27:25.030 [bodera-virtual17] Calling product/17
+00:27:25.030 [bodera-virtual18] Calling product/18
+00:27:25.030 [bodera-virtual19] Calling product/19
+(... 3 more tasks in parallel ...)
+```
+
+**Observation:**
+- ✅ Exactly 3 API calls at a time (15, 13, 16)
+- ✅ When they complete, next 3 start (17, 18, 19)
+- ✅ Thread names are descriptive
+- ✅ Concurrency limit is respected perfectly!
+
+---
+
+## Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  User Application                                       │
+│  └─ limiter.submit(callable)                            │
+│     └─ limiter.submit(callable)                         │
+│        └─ limiter.submit(callable) × 20                 │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  ConcurrencyLimiter                                     │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ public <T> Future<T> submit(Callable<T> callable)│  │
+│  │   return executor.submit(() ->                  │  │
+│  │     wrapCallable(callable))                     │  │
+│  └───────────────────────────────────────────────────┘  │
+│                                                         │
+│  ┌───────────────────────────────────────────────────┐  │
+│  │ private <T> T wrapCallable(Callable<T> callable)│  │
+│  │   semaphore.acquire()                           │  │
+│  │   try:                                          │  │
+│  │     return callable.call()                      │  │
+│  │   finally:                                      │  │
+│  │     semaphore.release()                        │  │
+│  └───────────────────────────────────────────────────┘  │
+│                                                         │
+│  Members:                                               │
+│  ├─ ExecutorService executor                            │
+│  └─ Semaphore semaphore (limit=3)                       │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  ExecutorService (VT or Platform)                       │
+│  ├─ Creates virtual threads                             │
+│  ├─ Executes wrapped callables                          │
+│  └─ Manages thread lifecycle                            │
+└──────────────────┬──────────────────────────────────────┘
+                   │
+┌──────────────────▼──────────────────────────────────────┐
+│  Execution                                              │
+│  ├─ VT-1: semaphore.acquire() → execute → release       │
+│  ├─ VT-2: semaphore.acquire() → execute → release       │
+│  ├─ VT-3: semaphore.acquire() → execute → release       │
+│  ├─ VT-4: semaphore.acquire() [BLOCKED] → ...           │
+│  └─ ... (repeats as permits become available)          │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Generic Implementation: Understanding `<T>`
+
+### Why Generics?
+
+The wrapper should work with **any type** of callable return value:
+
+```java
+// Callable that returns String
+limiter.submit(() -> Client.getProduct(1));  // Future<String>
+
+// Callable that returns Integer
+limiter.submit(() -> calculateTotal());      // Future<Integer>
+
+// Callable that returns User
+limiter.submit(() -> userService.getUser()); // Future<User>
+
+// Callable that returns Void
+limiter.submit(() -> {
+    System.out.println("done");
+    return null;
+});                                          // Future<Void>
+```
+
+### Generic Method Signature
+
+```java
+public <T> Future<T> submit(Callable<T> callable) {
+    //      ↑ Type parameter
+    //      └─ "T can be any type"
+    
+    return executor.submit(() -> wrapCallable(callable));
+    //     ↑ Returns Future<T>
+}
+
+private <T> T wrapCallable(Callable<T> callable) {
+    //      ↑ Type parameter (same as above)
+    try {
+        semaphore.acquire();
+        return callable.call();  // Returns T
+        //     ↑ Type T
+    } finally {
+        semaphore.release();
+    }
+}
+```
+
+### Type Safety Example
+
+```java
+// Compile-time type checking
+var limiter = new ConcurrencyLimiter(executor, 3);
+
+// ✅ Correct - submit returns Callable<String>
+Future<String> future1 = limiter.submit(
+    () -> Client.getProduct(1)  // Returns String
+);
+String product = future1.get();
+
+// ❌ Compile error - type mismatch
+Future<Integer> future2 = limiter.submit(
+    () -> Client.getProduct(1)  // Returns String, not Integer!
+);
+```
+
+---
+
+## AutoCloseable Implementation
+
+### Why Implement AutoCloseable?
+
+```java
+public class ConcurrencyLimiter implements AutoCloseable {
+    
+    @Override
+    public void close() {
+        this.executor.close();
+    }
+}
+```
+
+### Enables Try-With-Resources
+
+```java
+// Before: Manual cleanup
+var limiter = new ConcurrencyLimiter(executor, 3);
+try {
+    limiter.submit(() -> task1());
+    limiter.submit(() -> task2());
+} finally {
+    limiter.close();  // ← Manual cleanup
+}
+
+// After: Automatic cleanup
+try (var limiter = new ConcurrencyLimiter(executor, 3)) {
+    limiter.submit(() -> task1());
+    limiter.submit(() -> task2());
+}  // ← Automatic shutdown
+```
+
+---
+
+## Error Handling Design
+
+### Current Implementation
+
+```java
+private <T> T wrapCallable(Callable<T> callable) {
+    try {
+        semaphore.acquire();
+        return callable.call();
+    } catch (Exception e) {
+        LOGGER.error("Exception in callable", e);
+        throw new RuntimeException(e);  // Wrap and throw
+    } finally {
+        semaphore.release();
+    }
+}
+```
+
+### Why This Approach?
+
+1. **Checked Exception Handling**
+   - `Callable.call()` throws `Exception`
+   - We need to handle it
+
+2. **Logging**
+   - Log the error for debugging
+
+3. **Propagation**
+   - Wrap in RuntimeException for caller
+
+4. **Finally Block**
+   - ALWAYS release the semaphore, even on error!
+
+### Timeline with Error
+
+```
+Task execution with error:
+
+0ms:   semaphore.acquire() → Success (permits: 2)
+1ms:   callable.call() → Throws exception!
+2ms:   LOGGER.error() → Log the error
+3ms:   CATCH block executes
+4ms:   THROW RuntimeException
+       ↓
+       FINALLY block still executes!
+       ├─ semaphore.release()
+       └─ Permits: 3 (restored!)
+       ↓
+5ms:   Exception propagates to caller
+       └─ future.get() throws RuntimeException
+```
+
+**Key:** Even with exception, semaphore is released!
+
+---
+
+## Extensibility: Enhancing the Wrapper
+
+### Version 1: Basic (Current)
+
+```java
+public <T> Future<T> submit(Callable<T> callable)
+```
+
+### Version 2: With Timeout
+
+```java
+public <T> Future<T> submit(Callable<T> callable, 
+                            long timeout, TimeUnit unit) {
+    return executor.submit(() -> {
+        if (!semaphore.tryAcquire(timeout, unit)) {
+            throw new TimeoutException("Couldn't acquire permit");
+        }
+        try {
+            return callable.call();
+        } finally {
+            semaphore.release();
+        }
+    });
+}
+```
+
+### Version 3: With Fallback
+
+```java
+public <T> Future<T> submit(Callable<T> callable,
+                            T fallbackValue) {
+    return executor.submit(() -> {
+        if (!semaphore.tryAcquire()) {
+            LOGGER.warn("Returning fallback value");
+            return fallbackValue;  // Return default instead of blocking
+        }
+        try {
+            return callable.call();
+        } finally {
+            semaphore.release();
+        }
+    });
+}
+```
+
+### Version 4: Full ExecutorService Delegation
+
+```java
+public class FullConcurrencyLimiter implements ExecutorService {
+    // Implement ALL ExecutorService methods
+    // ├─ submit(Runnable)
+    // ├─ submit(Callable)
+    // ├─ invokeAll()
+    // ├─ invokeAny()
+    // ├─ execute()
+    // └─ ... etc
+    
+    // Each method wraps with semaphore logic
+}
+```
+
+---
+
+## Real-World Usage Scenarios
+
+### Scenario 1: Database Connection Limiting
+
+```java
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+var dbLimiter = new ConcurrencyLimiter(executor, 10);  // Max 10 DB connections
+
+// Can submit thousands of tasks, but only 10 access DB concurrently
+for (User user : millionUsers) {
+    dbLimiter.submit(() -> updateUserInDatabase(user));
+}
+```
+
+### Scenario 2: External API Rate Limiting
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+var apiLimiter = new ConcurrencyLimiter(executor, 5);  // API allows 5/sec
+
+// Submit all tasks, but respect rate limit
+for (Request request : allRequests) {
+    apiLimiter.submit(() -> externalAPI.call(request));
+}
+```
+
+### Scenario 3: Multiple Rate Limits
+
+```java
+// Different limits for different services
+var userServiceLimiter = new ConcurrencyLimiter(executor, 5);
+var orderServiceLimiter = new ConcurrencyLimiter(executor, 3);
+var paymentServiceLimiter = new ConcurrencyLimiter(executor, 2);
+
+// Use each as needed
+userServiceLimiter.submit(() -> userService.getUser(id));
+orderServiceLimiter.submit(() -> orderService.getOrder(id));
+paymentServiceLimiter.submit(() -> paymentService.charge(amount));
+```
+
+---
+
+## Key Design Insights
+
+### 1. Separation of Concerns
+
+```
+ConcurrencyLimiter:
+├─ Responsibility: Apply concurrency limit
+└─ Does NOT care about: Actual work being done
+
+ExecutorService:
+├─ Responsibility: Thread management
+└─ Does NOT care about: Concurrency limits
+
+Callable:
+├─ Responsibility: Actual work
+└─ Does NOT care about: How it's executed
+```
+
+### 2. Composability
+
+```java
+// Can combine multiple wrappers!
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+var timeoutExecutor = new TimeoutDecorator(executor);
+var loggingExecutor = new LoggingDecorator(timeoutExecutor);
+var limitedExecutor = new ConcurrencyLimiter(loggingExecutor, 3);
+
+// Each layer adds behavior!
+```
+
+### 3. Reusability
+
+```java
+// Create once, use many times
+var limiter = new ConcurrencyLimiter(executor, 3);
+
+limiter.submit(task1);
+limiter.submit(task2);
+limiter.submit(task3);
+// ... 100 more times
+
+// Logic centralized in one place
+```
+
+---
+
+## Testing the Concurrency Limiter
+
+### Test: Verify Concurrency Limit
+
+```java
+@Test
+public void testConcurrencyLimit() throws InterruptedException {
+    AtomicInteger currentConcurrency = new AtomicInteger(0);
+    AtomicInteger maxConcurrency = new AtomicInteger(0);
+    
+    ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+    var limiter = new ConcurrencyLimiter(executor, 3);
+    
+    for (int i = 0; i < 20; i++) {
+        limiter.submit(() -> {
+            int current = currentConcurrency.incrementAndGet();
+            maxConcurrency.updateAndGet(max -> Math.max(max, current));
+            
+            Thread.sleep(Duration.ofSeconds(1));
+            currentConcurrency.decrementAndGet();
+            
+            return null;
+        });
+    }
+    
+    Thread.sleep(Duration.ofSeconds(5));
+    
+    // Verify max concurrency was never exceeded
+    assertTrue(maxConcurrency.get() <= 3, 
+        "Max concurrency was " + maxConcurrency.get());
+}
+```
+
+---
+
+## Summary Table
+
+| Aspect | Without Wrapper | With Wrapper |
+|--------|-----------------|--------------|
+| **Code per task** | 15 lines | 1 line |
+| **Boilerplate** | High | None |
+| **Error handling** | Inline | Centralized |
+| **Maintainability** | Low | High |
+| **Reusability** | None | Full |
+| **Clarity** | Mixed concerns | Clear intent |
+| **Performance** | Same | Same |
+| **Safety** | Easy to break | Hard to break |
+
+---
+
+## Best Practices
+
+### ✅ DO: Use for External Service Calls
+
+```java
+var limiter = new ConcurrencyLimiter(executor, rateLimitFromAPI);
+for (Request req : requests) {
+    limiter.submit(() -> externalAPI.call(req));
+}
+```
+
+### ✅ DO: Use for Database Operations
+
+```java
+var limiter = new ConcurrencyLimiter(executor, dbPoolSize);
+for (User user : users) {
+    limiter.submit(() -> database.save(user));
+}
+```
+
+### ✅ DO: Use Try-With-Resources
+
+```java
+try (var limiter = new ConcurrencyLimiter(executor, 3)) {
+    // Submit tasks
+}  // Auto-cleanup
+```
+
+### ❌ DON'T: Ignore Returned Futures
+
+```java
+// WRONG - fire and forget
+limiter.submit(() -> importantTask());
+
+// RIGHT - handle results or errors
+Future<Result> future = limiter.submit(() -> importantTask());
+try {
+    Result result = future.get();
+} catch (ExecutionException e) {
+    // Handle error
+}
+```
+
+### ❌ DON'T: Mix Multiple Limiters Incorrectly
+
+```java
+// WRONG - each limiter has its own semaphore
+var limiter1 = new ConcurrencyLimiter(executor, 3);
+var limiter2 = new ConcurrencyLimiter(executor, 3);
+// Total: 6 concurrent (not 3!)
+
+// RIGHT - share executor, use single limiter
+var limiter = new ConcurrencyLimiter(executor, 3);
+// Total: exactly 3 concurrent
+```
+
+---
+
+## Key Takeaways
+
+1. **ConcurrencyLimiter solves a real problem** - Repetitive semaphore wrapping code
+
+2. **Decorator pattern in action** - Adds behavior without modifying original
+
+3. **Separation of concerns** - Concurrency logic separate from business logic
+
+4. **Reusability matters** - Write once, use everywhere
+
+5. **Error handling still works** - Even if something goes wrong, semaphore is released
+
+6. **Try-with-resources friendly** - Implements AutoCloseable for clean shutdown
+
+7. **Works with any executor** - Platform threads, virtual threads, custom executors
+
+8. **Generic implementation** - Handles any return type
+
+---
+
+## Quick Reference
+
+### Basic Usage
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+var limiter = new ConcurrencyLimiter(executor, 3);
+
+try (limiter) {
+    for (int i = 1; i <= 20; i++) {
+        int id = i;
+        limiter.submit(() -> doWork(id));
+    }
+}
+```
+
+### With Custom Thread Names
+
+```java
+var factory = Thread.ofVirtual()
+    .name("task-", 1)
+    .factory();
+
+var executor = Executors.newThreadPerTaskExecutor(factory);
+var limiter = new ConcurrencyLimiter(executor, 3);
+
+limiter.submit(() -> doWork());
+```
+
+### With Different Limits per Service
+
+```java
+var userLimiter = new ConcurrencyLimiter(executor, 5);
+var orderLimiter = new ConcurrencyLimiter(executor, 3);
+var paymentLimiter = new ConcurrencyLimiter(executor, 2);
+```
+
+---
+
+**Next Concept:** Building on ConcurrencyLimiter, you can extend it with timeout handling, fallback values, and more advanced patterns! 🚀
+
+---
+
+## Further Reading
+
+- [Decorator Pattern](https://en.wikipedia.org/wiki/Decorator_pattern)
+- [Java Executor Framework](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ExecutorService.html)
+- [Virtual Threads Documentation](https://openjdk.org/jeps/444)
+- [Semaphore API](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Semaphore.html)
+
+---
+
+**Remember:** Good abstractions hide complexity and make code more maintainable. ConcurrencyLimiter is a perfect example! ✨
