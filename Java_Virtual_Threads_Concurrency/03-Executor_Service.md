@@ -7623,3 +7623,807 @@ var paymentLimiter = new ConcurrencyLimiter(executor, 2);
 ---
 
 **Remember:** Good abstractions hide complexity and make code more maintainable. ConcurrencyLimiter is a perfect example! ✨
+
+---
+
+# 📊 Execution Order: Understanding Platform Threads vs Virtual Threads
+
+## TL;DR
+
+**Platform Thread Executors** (Fixed, Cached, Scheduled) maintain **ordered execution** because they have an internal queue.
+
+**Virtual Thread Per-Task Executor** does NOT guarantee order because it creates threads on-demand and relies on carrier thread scheduling.
+
+```
+Platform Threads:         Virtual Threads:
+Task Queue:               No Queue:
+[1] → [2] → [3]          Create VT-1, VT-2, VT-3
+ ↓     ↓     ↓            (start immediately)
+[1]   [2]   [3]           ↓
+(ordered)                 (unpredictable order)
+```
+
+---
+
+## The Problem: Out-of-Order Execution
+
+### Observation from Tests
+
+#### Test 1: FixedThreadPool(1) - Ordered ✅
+
+```java
+var executor = Executors.newFixedThreadPool(1);
+for (int i = 1; i <= 20; i++) {
+    executor.submit(() -> LOGGER.info("Task {}", i));
+}
+```
+
+**Output:**
+```
+Task 1
+Task 2
+Task 3
+Task 4
+Task 5
+... (continues in order)
+Task 20
+```
+
+**Status:** ✅ Perfectly ordered (only 1 thread, sequential execution)
+
+---
+
+#### Test 2: FixedThreadPool(3) - Mostly Ordered ✅
+
+```java
+var executor = Executors.newFixedThreadPool(3);
+for (int i = 1; i <= 20; i++) {
+    executor.submit(() -> LOGGER.info("Task {}", i));
+}
+```
+
+**Output:**
+```
+Task 1    Task 2    Task 3
+(run in parallel on 3 threads)
+
+Task 4    Task 5    Task 6
+(next batch after first 3 complete)
+
+Task 7    Task 8    Task 9
+(next batch)
+
+... continues in groups of 3
+```
+
+**Status:** ✅ Ordered within batches (3 threads share work queue)
+
+---
+
+#### Test 3: Virtual Thread Per-Task - Chaotic ❌
+
+```java
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+for (int i = 1; i <= 20; i++) {
+    executor.submit(() -> LOGGER.info("Task {}", i));
+}
+```
+
+**Output:**
+```
+Task 3    Task 2    Task 1
+(random order!)
+
+Task 5    Task 4    Task 7    Task 6    Task 8
+(totally unpredictable)
+
+Task 20   Task 9    Task 11   Task 10
+(chaos!)
+
+... etc
+```
+
+**Status:** ❌ Order completely unpredictable!
+
+---
+
+## Why This Happens: The Architecture Difference
+
+### How Platform Thread Executors Work
+
+```
+┌─────────────────────────────────────────────┐
+│ FixedThreadPool(3)                          │
+├─────────────────────────────────────────────┤
+│                                             │
+│  TASK QUEUE (Internal Data Structure)       │
+│  ┌─────────────────────────────────────┐    │
+│  │ [Task 1] → [Task 2] → [Task 3]   ...│    │
+│  └────────┬─────────────┬────────┬─────┘    │
+│           │             │        │          │
+│      ┌────▼──┐     ┌────▼──┐ ┌──▼────┐      │
+│      │Thread1│     │Thread2│ │Thread3│      │
+│      │       │     │       │ │       │      │
+│      │Working│     │Working│ │Working│      │
+│      │on T1  │     │on T2  │ │on T3  │      │
+│      └───────┘     └───────┘ └───────┘      │
+│                                             │
+│  Status: Thread 1, 2, 3 are busy            │
+│  Waiting: Task 4, 5, 6, ... in queue        │
+│                                             │
+└─────────────────────────────────────────────┘
+
+Timeline:
+Time 0ms:   Submit Tasks 1-20
+            Queue: [1][2][3][4][5]...[20]
+            Threads: executing [1], [2], [3]
+            
+Time 100ms: Thread 1 finishes Task 1
+            Queue: [5][6]...[20]
+            Threads: picks Task 4, executing [4], [2], [3]
+            
+Time 200ms: Thread 2 finishes Task 2
+            Queue: [6][7]...[20]
+            Threads: picks Task 5, executing [4], [5], [3]
+
+(Tasks are ALWAYS picked in order from queue: 1, 2, 3, 4, 5, ...)
+```
+
+### How Virtual Thread Per-Task Executor Works
+
+```
+┌──────────────────────────────────────────┐
+│ newVirtualThreadPerTaskExecutor()        │
+├──────────────────────────────────────────┤
+│                                          │
+│  NO QUEUE - Creates threads immediately! │
+│                                          │
+│  Submit Task 1 → Create VT-1 → Start it  │
+│  Submit Task 2 → Create VT-2 → Start it  │
+│  Submit Task 3 → Create VT-3 → Start it  │
+│  Submit Task 4 → Create VT-4 → Start it  │
+│  ...                                     │
+│  Submit Task 20 → Create VT-20 → Start it│
+│                                          │
+│  ┌─────────────────────────────────┐     │
+│  │ VT-1   VT-2   VT-3   VT-4 ...   │     │
+│  │ (all created and started!)      │     │
+│  └────────┬──────┬────────┬────────┘     │
+│           │      │        │              │
+│      ┌────▼─┐┌──▼───┐┌───▼────┐         │
+│      │ OS   ││ OS   ││ OS     │ │        │
+│      │Thread││Thread││Thread  │ │       │
+│      │ (PT) ││ (PT) ││(PT)    │ │        │
+│      └──────┘└──────┘└────────┘ │       │
+│                                 │       │
+│  Carrier Threads pick VTs       │       │
+│  to execute (UNPREDICTABLE!)    │       │
+│                                          │
+└──────────────────────────────────────────┘
+
+Timeline:
+Time 0ms:    Submit Tasks 1-20
+             VT-1 to VT-20 created & started
+             Carrier Thread 1 picks VT-3
+             Carrier Thread 2 picks VT-1
+             Carrier Thread 3 picks VT-5
+             
+             (Which VT runs first? Random!)
+             
+Time 10ms:   Carrier Thread 2 finishes VT-1
+             Picks VT-12 next (not VT-2!)
+             
+Time 20ms:   Carrier Thread 1 finishes VT-3
+             Picks VT-8 next (not VT-4!)
+             
+(No queue = NO ORDER GUARANTEE)
+```
+
+---
+
+## Visual Comparison: Task Submission Flow
+
+### Platform Threads: Ordered via Queue
+
+```
+User submits:    [1]  [2]  [3]  [4]  [5]
+                  ↓    ↓    ↓    ↓    ↓
+              ┌───────────────────────┐
+              │   QUEUE (FIFO order)  │
+              │ [1]→[2]→[3]→[4]→[5]   │
+              └─┬─────┬────────┬──────┘
+                │     │        │
+            ┌───▼──┬──▼───┬───▼────┐
+            │Thread│Thread│Thread  │
+            │  A   │  B   │  C     │
+            ├──────┼──────┼────────┤
+            │ Exec │ Exec │ Exec   │
+            │ [1]  │ [2]  │ [3]    │
+            └──────┴──────┴────────┘
+
+When Thread A finishes [1]:
+            ┌───────────────────────┐
+            │ Queue: [4]→[5]→...    │
+            └─────┬─────────────────┘
+                  │
+            ┌─────▼──┐
+            │Thread A│ picks next from queue: [4]
+            └────────┘
+
+GUARANTEE: Always picks from head of queue
+           First in = First out (FIFO)
+```
+
+### Virtual Threads: No Queue = Unpredictable
+
+```
+User submits:    [1]  [2]  [3]  [4]  [5]
+                  ↓    ↓    ↓    ↓    ↓
+              ┌─────────────────────────┐
+              │  Create & Start VTs     │
+              │  (NO QUEUE)             │
+              └─┬───┬───┬───┬───┬───────┘
+                │   │   │   │   │
+            VT1 VT2 VT3 VT4 VT5 ...
+            (all exist, order unknown!)
+
+Carrier Thread 1 picks: VT-3 (why? random!)
+Carrier Thread 2 picks: VT-1 (why? random!)
+Carrier Thread 3 picks: VT-5 (why? random!)
+
+RESULT: No guaranteed order
+        Execution is chaotic
+```
+
+---
+
+## State Diagram: Queue vs No Queue
+
+### FixedThreadPool(3): With Queue
+
+```
+START: Submit 6 tasks
+
+[1] [2] [3] [4] [5] [6]
+↓   ↓   ↓   ↓   ↓   ↓
+
+QUEUE: [1]→[2]→[3]→[4]→[5]→[6]
+THREADS:
+├─ T1: executing [1]
+├─ T2: executing [2]
+└─ T3: executing [3]
+
+STATUS: T1, T2, T3 are busy, T4 waits in queue
+
+---
+
+TIME 100ms: T1 finishes
+
+QUEUE: [5]→[6]
+THREADS:
+├─ T1: picks next from queue: [4]  ← GUARANTEED to be [4]
+├─ T2: executing [2]
+└─ T3: executing [3]
+
+STATUS: [4] is guaranteed to execute after [1],[2],[3]
+
+---
+
+TIME 200ms: T2 finishes
+
+QUEUE: [6]
+THREADS:
+├─ T1: executing [4]
+├─ T2: picks next from queue: [5]  ← GUARANTEED to be [5]
+└─ T3: executing [3]
+
+STATUS: [5] is guaranteed to execute in order
+```
+
+### Virtual Thread Per-Task: No Queue = Chaos
+
+```
+START: Submit 6 tasks
+
+[1] [2] [3] [4] [5] [6]
+↓   ↓   ↓   ↓   ↓   ↓
+
+CREATED: VT1, VT2, VT3, VT4, VT5, VT6 (all exist)
+NO QUEUE!
+
+CARRIER THREADS schedule:
+├─ Carrier 1: picks VT-3 (why? CPU scheduling!)
+├─ Carrier 2: picks VT-1 (why? OS decides!)
+└─ Carrier 3: picks VT-5 (why? Random!)
+
+EXECUTION ORDER: [3], [1], [5], ...
+EXPECTED ORDER:  [1], [2], [3], ...
+RESULT: MISMATCH! ❌
+
+---
+
+TIME 100ms: Carrier 1 finishes VT-3
+
+CARRIER THREADS reschedule:
+├─ Carrier 1: picks VT-? (any VT not yet scheduled)
+                     ↑
+              Could be VT-2, VT-4, VT-6
+              NOT guaranteed to be sequential!
+
+RESULT: Still chaotic!
+```
+
+---
+
+## Detailed Execution Timeline Diagrams
+
+### Test Case: 12 Tasks with Different Executors
+
+#### FixedThreadPool(1)
+
+```
+Submit: [1] [2] [3] [4] [5] [6] [7] [8] [9][10][11][12]
+
+Timeline:
+0ms   [1] starts     ================
+100ms [1] ends       [2] starts =========
+200ms [2] ends       [3] starts =========
+300ms [3] ends       [4] starts =========
+...
+1200ms [12] ends
+
+Execution Order: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+Status: ✅ Perfect order, sequential
+```
+
+#### FixedThreadPool(3)
+
+```
+Submit: [1] [2] [3] [4] [5] [6] [7] [8] [9][10][11][12]
+
+Timeline:
+0ms   [1] starts [2] starts [3] starts
+      ======     ======     ======
+100ms [1] ends   [2] ends   [3] ends
+      [4] starts [5] starts [6] starts
+      ======     ======     ======
+200ms [4] ends   [5] ends   [6] ends
+      [7] starts [8] starts [9] starts
+      ======     ======     ======
+300ms [7] ends   [8] ends   [9] ends
+      [10] starts[11]starts [12]starts
+      ======     ======     ======
+400ms [10][11][12] all end
+
+Execution Order: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12
+Status: ✅ Perfect order (in batches of 3)
+```
+
+#### Virtual Thread Per-Task
+
+```
+Submit: [1] [2] [3] [4] [5] [6] [7] [8] [9][10][11][12]
+
+Timeline:
+0ms   VT-1 created, started by Carrier-1
+      VT-2 created, started by Carrier-2
+      VT-3 created, started by Carrier-3
+      VT-4 created, queued
+      VT-5 created, queued
+      VT-6 created, queued
+      ... all VTs created
+
+10ms  Carrier-1: executes VT-3
+      Carrier-2: executes VT-1
+      Carrier-3: executes VT-5
+      (NOT 1, 2, 3!)
+
+20ms  Carrier-2: VT-1 finishes
+      Carrier-2: picks VT-8 (random!)
+      Carrier-1: VT-3 finishes
+      Carrier-1: picks VT-2 (random!)
+
+30ms  Complete chaos - order is jumbled
+
+Execution Order: 3, 1, 5, 8, 2, 11, 4, 9, 12, 6, 7, 10
+Status: ❌ Completely unpredictable
+```
+
+---
+
+## Why the Difference: Root Cause Analysis
+
+### Platform Threads: Queue Architecture
+
+```
+Design: "Control + Order"
+
+Features:
+├─ Queue to hold all submitted tasks
+├─ Threads pull from queue in order
+├─ Guarantees FIFO (First In, First Out)
+├─ Predictable execution
+└─ Cost: Some overhead from queue management
+
+Advantage: Easy to reason about
+Disadvantage: Queue overhead for millions of tasks
+```
+
+### Virtual Threads: Per-Task Architecture
+
+```
+Design: "Lightweight + Scalable"
+
+Features:
+├─ No queue (saves memory)
+├─ Create thread immediately per task
+├─ Carrier threads schedule VTs non-deterministically
+├─ Unpredictable execution order
+└─ Cost: You lose ordering guarantees
+
+Advantage: Ultra-lightweight, minimal overhead
+Disadvantage: Must handle ordering separately if needed
+```
+
+---
+
+## Visual Comparison: Memory Usage
+
+### FixedThreadPool(3) with 1000 Tasks
+
+```
+Memory Layout:
+┌──────────────────────────────┐
+│ FixedThreadPool(3)           │
+├──────────────────────────────┤
+│ Threads: 3                   │
+│ ├─ Thread-1: 1-2 MB stack    │
+│ ├─ Thread-2: 1-2 MB stack    │
+│ └─ Thread-3: 1-2 MB stack    │
+│ Total: ~3-6 MB               │
+│                              │
+│ Task Queue: 1000 tasks       │
+│ ├─ Task metadata × 1000      │
+│ └─ ~5-10 MB for queue        │
+│                              │
+│ TOTAL: ~10-15 MB             │
+└──────────────────────────────┘
+
+Waiting Queue:
+[T4][T5][T6][T7]...[T1000]
+```
+
+### Virtual Thread Per-Task with 1000 Tasks
+
+```
+Memory Layout:
+┌──────────────────────────────┐
+│ newVirtualThreadPerTaskExecutor()
+├──────────────────────────────┤
+│ Virtual Threads: 1000        │
+│ ├─ VT-1: ~KB each            │
+│ ├─ VT-2: ~KB each            │
+│ └─ VT-1000: ~KB each         │
+│ Total: ~50-100 MB            │
+│                              │
+│ Carrier Threads: 4-8         │
+│ ├─ Carrier-1: 1-2 MB stack   │
+│ ├─ Carrier-2: 1-2 MB stack   │
+│ ...                          │
+│                              │
+│ TOTAL: ~60-110 MB            │
+│ (mostly VT memory, not thread stacks)
+└──────────────────────────────┘
+
+Carrier-1: executing VT-3
+Carrier-2: executing VT-1
+Carrier-3: executing VT-5
+Carrier-4: parked
+```
+
+---
+
+## Understanding Carrier Thread Scheduling
+
+### What is a Carrier Thread?
+
+```
+Virtual Thread:
+├─ Lightweight user-space thread
+├─ NO kernel resource
+├─ Scheduled on demand
+└─ Can be parked/unparked
+
+Carrier Thread:
+├─ Platform thread from ForkJoinPool
+├─ OS kernel resource
+├─ Executes virtual threads
+├─ Multiplexes many VTs
+└─ Few in number (1 per CPU core)
+```
+
+### Carrier Thread Lifecycle
+
+```
+Carrier Thread execution:
+
+Time 0ms:   Idle
+            ↓
+            Picks VT-3 from ready list
+            ↓
+Time 10ms:  Executes VT-3
+            ↓
+            VT-3 does I/O (blocks)
+            ↓
+            Carrier thread parks VT-3
+            ↓
+Time 15ms:  Picks VT-1 from ready list
+            (NOT VT-2, because VT-2 wasn't ready yet!)
+            ↓
+Time 25ms:  Executes VT-1
+            ↓
+            VT-1 completes
+            ↓
+            Picks next VT (which one? depends on ready list!)
+            ↓
+
+Key: Order depends on:
+├─ When VTs become ready
+├─ When they block
+├─ Which ones are in the ready list
+└─ CPU scheduling (non-deterministic!)
+```
+
+---
+
+## Real-World Scenario: What Order Do You Get?
+
+### Scenario: Process 20 API Calls
+
+```
+Virtual Thread Per-Task:
+
+User: "Process calls 1-20"
+     ↓
+System creates VT-1 to VT-20
+     ↓
+Carrier threads start executing them:
+
+Actual execution order might be:
+15, 3, 18, 7, 1, 12, 5, 19, 9, 2, 14, 11, 8, 6, 20, 4, 10, 16, 17, 13
+
+Why this order?
+├─ VT-15 was ready first (random luck)
+├─ VT-3 became ready next
+├─ VT-18 had lowest latency in I/O
+├─ etc.
+└─ TOTALLY UNPREDICTABLE
+
+Solution needed:
+├─ If order matters, don't use VT per-task
+├─ OR: Implement custom ordering logic
+└─ We'll see how in next lecture
+```
+
+---
+
+## Choosing the Right Executor
+
+### Decision Tree
+
+```
+"I need to submit multiple tasks"
+
+├─ "Order MUST be preserved"
+│  └─ Use FixedThreadPool(n) or SingleThreadExecutor
+│     Cost: Slight overhead from queue
+│     Benefit: Guaranteed FIFO order
+│
+├─ "Order doesn't matter, lightweight is key"
+│  └─ Use newVirtualThreadPerTaskExecutor()
+│     Cost: Unpredictable execution order
+│     Benefit: Lightweight, scalable
+│
+├─ "Limited resources (DB connections, API rate limit)"
+│  └─ Use FixedThreadPool(n) with semaphore
+│     Cost: Limited concurrency
+│     Benefit: Resource protection + order
+│
+└─ "Complex ordering requirements"
+   └─ Use FixedThreadPool(n) with semaphore
+      OR: Implement custom task coordinator
+      (We'll see this next!)
+```
+
+---
+
+## Summary Table: Execution Order
+
+| Executor | Order Preserved | Queue | Memory | Speed |
+|----------|-----------------|-------|--------|-------|
+| **SingleThreadExecutor** | ✅ Yes | Yes | Low | Slowest |
+| **FixedThreadPool(N)** | ✅ Yes | Yes | Low | Medium |
+| **CachedThreadPool** | ✅ Yes | Yes | Medium | Fast |
+| **ScheduledThreadPool** | ✅ Yes | Yes | Medium | Medium |
+| **VirtualThreadPerTask** | ❌ No | No | High | Fastest |
+
+---
+
+## Key Insights
+
+### The Tradeoff
+
+```
+More Control & Order:
+  ├─ FixedThreadPool
+  ├─ CachedThreadPool
+  ├─ ScheduledThreadPool
+  └─ All have internal queues → Order preserved
+
+Less Control, More Performance:
+  ├─ VirtualThreadPerTask
+  ├─ No queue
+  └─ Order NOT preserved
+```
+
+### When Order Matters
+
+```
+✅ Use Queue-based Executor when:
+├─ Processing sequential data
+├─ Order affects correctness
+├─ Downstream operations depend on order
+└─ User expectations require order
+
+❌ Don't use VT Per-Task when:
+├─ Need guaranteed FIFO order
+├─ Processing depends on sequence
+└─ Output order must match input order
+```
+
+### When Order Doesn't Matter
+
+```
+✅ Use VT Per-Task when:
+├─ Tasks are independent
+├─ Scalability is critical
+├─ Order is irrelevant
+└─ Millions of concurrent operations
+
+❌ Use Queue-based when:
+├─ Overkill for simple tasks
+├─ Waste overhead on ordering
+└─ Could use lighter VT solution
+```
+
+---
+
+## Preview: Next Lecture - Maintaining Order
+
+```
+Solution: Custom Task Coordinator
+
+Option 1: Use SingleThreadExecutor with VTs
+Option 2: Use Semaphore + custom queue
+Option 3: Use custom ordering coordinator
+
+All coming next! 🚀
+```
+
+---
+
+## Best Practices
+
+### ✅ DO: Choose Executor Based on Requirements
+
+```java
+// Need order? Use queue-based
+ExecutorService ordered = Executors.newFixedThreadPool(3);
+
+// Don't need order? Use VT
+ExecutorService fast = Executors.newVirtualThreadPerTaskExecutor();
+```
+
+### ✅ DO: Document Order Requirements
+
+```java
+/**
+ * Processes tasks sequentially to maintain order
+ * (important because downstream depends on sequence)
+ */
+public void processInOrder(List<Task> tasks) {
+    var executor = Executors.newSingleThreadExecutor();
+    for (Task task : tasks) {
+        executor.submit(task);
+    }
+}
+```
+
+### ❌ DON'T: Assume Order with VT Per-Task
+
+```java
+// WRONG - assuming order is maintained
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+for (int i = 1; i <= 100; i++) {
+    executor.submit(() -> {
+        processRecord(i);  // Might execute out of order!
+    });
+}
+```
+
+### ❌ DON'T: Use Queue-based When Order Irrelevant
+
+```java
+// WRONG - overkill overhead
+var executor = Executors.newFixedThreadPool(100);
+for (Request req : independentRequests) {
+    executor.submit(() -> handleRequest(req));  // Wastes queue overhead
+}
+
+// RIGHT - use VT
+var executor = Executors.newVirtualThreadPerTaskExecutor();
+for (Request req : independentRequests) {
+    executor.submit(() -> handleRequest(req));  // Lightweight
+}
+```
+
+---
+
+## Key Takeaways
+
+1. **Platform Thread Executors maintain order** via internal queues
+
+2. **Virtual Thread Per-Task has no queue** and execution is unpredictable
+
+3. **The tradeoff:** Order vs Performance/Scalability
+
+4. **Know your requirements** - do you need order or not?
+
+5. **Order unpredictability is NOT a bug** - it's by design for VT
+
+6. **Choose the right tool** for the right job
+
+7. **Next lecture** - how to maintain order with virtual threads if needed
+
+---
+
+## Quick Reference
+
+### For Ordered Execution
+
+```java
+ExecutorService executor = Executors.newFixedThreadPool(3);
+// or
+ExecutorService executor = Executors.newSingleThreadExecutor();
+```
+
+### For Unordered, High Performance
+
+```java
+ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+```
+
+### With Concurrency Limit + Order
+
+```java
+var limiter = new ConcurrencyLimiter(
+    Executors.newFixedThreadPool(3),  // Maintains order
+    3                                   // But respects limit too
+);
+```
+
+---
+
+**Next Concept:** If you need both virtual threads AND guaranteed order, we'll learn custom solutions! 🎯
+
+---
+
+## Further Reading
+
+- [Virtual Thread Scheduling](https://openjdk.org/jeps/444)
+- [ForkJoinPool Carrier Threads](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/ForkJoinPool.html)
+- [Executor Framework Design](https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/Executor.html)
+
+---
+
+**Remember:** Virtual threads trade ordered execution for lightweight scalability. Understand your requirements and choose accordingly! 📊✨
